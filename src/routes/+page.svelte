@@ -1,42 +1,74 @@
 <!-- src/routes/+page.svelte -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { signIn } from '@auth/sveltekit/client';
+	import ArvayaLogo from '$lib/assets/ArvayaLogo.png';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
 </script>
 
 <div class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
 	<!-- Hero Section -->
 	<section class="px-6 py-20 lg:py-32">
 		<div class="max-w-4xl mx-auto text-center">
-			<h1 class="text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-6">
-				Spectra RAG
-				<span class="text-blue-600 dark:text-blue-400">Development</span>
-			</h1>
-			<p class="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
-				The Vector Database and Search and Rank is the lifeblood of Spectra's new smart recruitment engine.
-			</p>
-			<p class="text-lg text-gray-500 dark:text-gray-400 mb-12 max-w-2xl mx-auto">
-				Instead of tying you to services piece by piece with multiple menus, we store everything in our vector database (AI-Native Database) where you can search for the best candidate across all platforms, unified together in one chat.
-			</p>
-			<div class="flex flex-col sm:flex-row gap-4 justify-center">
-				<button
-					onclick={() => goto('/spectra-job')}
-					class="px-8 py-4 bg-blue-600 text-white rounded-lg font-semibold text-lg
-					       hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-					       transition-colors shadow-lg hover:shadow-xl"
-				>
-					Start Chatting
-				</button>
-				<button
-					onclick={() => {
-						document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' });
-					}}
-					class="px-8 py-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-2 border-gray-300 dark:border-gray-700 rounded-lg font-semibold text-lg
-					       hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2
-					       transition-colors"
-				>
-					Learn More
-				</button>
+			<!-- Company Logo -->
+			<div class="flex justify-center mb-8">
+				<img src={ArvayaLogo} alt="Arvaya Logo" class="h-16 md:h-20" />
 			</div>
+			
+			{#if !data.session}
+				<!-- Login Section -->
+				<h1 class="text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-6">
+					Welcome to
+					<span class="text-blue-600 dark:text-blue-400">Spectra RAG</span>
+				</h1>
+				<p class="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
+					Please sign in with your Microsoft account to continue.
+				</p>
+				<div class="flex justify-center">
+					<button
+						onclick={() => signIn('microsoft-entra-id')}
+						class="px-8 py-4 bg-blue-600 text-white rounded-lg font-semibold text-lg
+						       hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+						       transition-colors shadow-lg hover:shadow-xl"
+					>
+						Sign in with Microsoft
+					</button>
+				</div>
+			{:else}
+				<!-- Authenticated Content -->
+				<h1 class="text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-6">
+					Spectra RAG
+					<span class="text-blue-600 dark:text-blue-400">Development</span>
+				</h1>
+				<p class="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
+					The Vector Database and Search and Rank is the lifeblood of Spectra's new smart recruitment engine.
+				</p>
+				<p class="text-lg text-gray-500 dark:text-gray-400 mb-12 max-w-2xl mx-auto">
+					Instead of tying you to services piece by piece with multiple menus, we store everything in our vector database (AI-Native Database) where you can search for the best candidate across all platforms, unified together in one chat.
+				</p>
+				<div class="flex flex-col sm:flex-row gap-4 justify-center">
+					<button
+						onclick={() => goto('/spectra-job')}
+						class="px-8 py-4 bg-blue-600 text-white rounded-lg font-semibold text-lg
+						       hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+						       transition-colors shadow-lg hover:shadow-xl"
+					>
+						Start Chatting
+					</button>
+					<button
+						onclick={() => {
+							document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' });
+						}}
+						class="px-8 py-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-2 border-gray-300 dark:border-gray-700 rounded-lg font-semibold text-lg
+						       hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2
+						       transition-colors"
+					>
+						Learn More
+					</button>
+				</div>
+			{/if}
 		</div>
 	</section>
 

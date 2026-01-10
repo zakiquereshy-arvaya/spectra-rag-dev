@@ -2,12 +2,14 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { signOut } from '@auth/sveltekit/client';
 
 	interface Props {
 		isOpen?: boolean;
+		session?: any;
 	}
 
-	let { isOpen = $bindable(true) }: Props = $props();
+	let { isOpen = $bindable(true), session }: Props = $props();
 
 	const navItems = [
 		{ href: '/', label: 'Home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
@@ -111,8 +113,21 @@
 
 		<!-- Footer -->
 		<div class="p-4 border-t border-gray-200 dark:border-gray-800">
+			{#if session?.user}
+				<div class="mb-3">
+					<p class="text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">
+						{session.user.name || session.user.email}
+					</p>
+					<button
+						onclick={() => signOut()}
+						class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+					>
+						Sign Out
+					</button>
+				</div>
+			{/if}
 			<p class="text-xs text-gray-500 dark:text-gray-400 text-center">
-				© 2024 Spectra
+				© 2026 Arvaya AI & Automations Consulting 
 			</p>
 		</div>
 	</div>
