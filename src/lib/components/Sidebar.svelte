@@ -1,6 +1,6 @@
 <!-- src/lib/components/Sidebar.svelte -->
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { signOut } from '@auth/sveltekit/client';
 
@@ -17,7 +17,7 @@
 	];
 
 	function isActive(href: string): boolean {
-		return $page.url.pathname === href;
+		return page.url.pathname === href;
 	}
 
 	function handleNavigate(href: string) {
