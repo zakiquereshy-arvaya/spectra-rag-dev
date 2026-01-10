@@ -1,0 +1,431 @@
+// Microsoft Graph API Service for Calendar Operations
+
+import type {
+	MicrosoftGraphEvent,
+	MicrosoftGraphCalendar,
+	MicrosoftGraphCalendarViewParams,
+	MicrosoftGraphFreeBusyRequest,
+	MicrosoftGraphFreeBusyResponse,
+	CreateEventRequest,
+} from '$lib/types/microsoft-graph';
+import { MicrosoftGraphAuth } from './microsoft-graph-auth';
+
+const GRAPH_API_BASE = 'https://graph.microsoft.com/v1.0';
+
+export class MicrosoftGraphService {
+	private accessToken: string | null;
+	private authService: MicrosoftGraphAuth | null;
+
+	constructor(accessToken?: string, authService?: MicrosoftGraphAuth) {
+		this.accessToken = accessToken || null;
+		this.authService = authService || null;
+	}
+
+	/**
+	 * Get access token - use app-only if available, otherwise use delegated token
+	 */
+	private async getToken(): Promise<string> {
+		if (this.authService) {
+			// Use app-only token (client credentials) - has access to all users
+			return await this.authService.getAccessToken();
+		}
+		if (this.accessToken) {
+			// Use delegated token (user's own permissions)
+			return this.accessToken;
+		}
+		throw new Error('No access token or auth service available');
+	}
+
+	private async request<T>(
+		endpoint: string,
+		options: RequestInit = {}
+	): Promise<T> {
+		const url = `${GRAPH_API_BASE}${endpoint}`;
+		const token = await this.getToken();
+		
+		const response = await fetch(url, {
+			...options,
+			headers: {
+				'Authorization': `Bearer ${token}`,
+				'Content-Type': 'application/json',
+				...options.headers,
+			},
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			let error: any;
+			try {
+				error = JSON.parse(errorText);
+			} catch {
+				error = { message: errorText || response.statusText };
+			}
+			
+			console.error('Microsoft Graph API error:', {
+				status: response.status,
+				statusText: response.statusText,
+				endpoint: url,
+				error: error,
+			});
+			
+			// Extract more detailed error message
+			const errorMessage = error.error?.message || error.message || errorText || response.statusText;
+			const errorCode = error.error?.code || error.code || '';
+			
+			throw new Error(
+				`Microsoft Graph API error (${response.status}${errorCode ? ` - ${errorCode}` : ''}): ${errorMessage}`
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * Get user's calendars
+	 * Note: With app-only tokens, use getCalendarsForUser instead
+	 */
+	async getCalendars(): Promise<{ value: MicrosoftGraphCalendar[] }> {
+		// Try /me endpoint first (works with delegated tokens)
+		// If that fails and we have app-only auth, we can't use /me
+		try {
+			return this.request<{ value: MicrosoftGraphCalendar[] }>('/me/calendars');
+		} catch (error: any) {
+			if (error.message?.includes('401') || error.message?.includes('403')) {
+				throw new Error('Cannot access /me/calendars with app-only token. Use getCalendarsForUser(userId) instead.');
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * Get calendars for a specific user (works with app-only tokens)
+	 */
+	async getCalendarsForUser(userId: string): Promise<{ value: MicrosoftGraphCalendar[] }> {
+		return this.request<{ value: MicrosoftGraphCalendar[] }>(`/users/${userId}/calendars`);
+	}
+
+	/**
+	 * List all users in the organization
+	 */
+	async listUsers(): Promise<{ value: Array<{ id: string; displayName: string; mail?: string; userPrincipalName: string }> }> {
+		return this.request<{ value: Array<{ id: string; displayName: string; mail?: string; userPrincipalName: string }> }>(
+			'/users?$select=id,displayName,mail,userPrincipalName'
+		);
+	}
+
+	/**
+	 * Get user ID by email
+	 */
+	async getUserIdByEmail(email: string): Promise<string> {
+		const users = await this.listUsers();
+		for (const user of users.value) {
+			if (user.mail && user.mail.toLowerCase() === email.toLowerCase()) {
+				return user.id;
+			}
+			if (user.userPrincipalName.toLowerCase() === email.toLowerCase()) {
+				return user.id;
+			}
+		}
+		throw new Error(`User not found: ${email}`);
+	}
+
+	/**
+	 * Get current user's email
+	 */
+	async getCurrentUserEmail(): Promise<string> {
+		const me = await this.request<{ mail?: string; userPrincipalName: string }>('/me?$select=mail,userPrincipalName');
+		return me.mail || me.userPrincipalName;
+	}
+
+	/**
+	 * Get calendar view for a specific user
+	 * Uses app-only token (client credentials) which has access to all users' calendars
+	 */
+	async getUserCalendarView(
+		userEmail: string,
+		startDateTime: string,
+		endDateTime: string
+	): Promise<{ value: MicrosoftGraphEvent[] }> {
+		const queryParams = new URLSearchParams({
+			startDateTime,
+			endDateTime,
+			$select: 'subject,start,end,isAllDay,showAs',
+		});
+
+		// Get user ID by email
+		const userId = await this.getUserIdByEmail(userEmail);
+		
+		// Use /users/{userId}/calendarView endpoint (works with app-only permissions)
+		const allEvents: MicrosoftGraphEvent[] = [];
+		let nextLink: string | null = null;
+
+		while (true) {
+			let endpoint: string;
+			if (nextLink) {
+				// Remove the base URL if present
+				endpoint = nextLink.startsWith(GRAPH_API_BASE) 
+					? nextLink.replace(GRAPH_API_BASE, '')
+					: nextLink;
+			} else {
+				endpoint = `/users/${userId}/calendarView?${queryParams.toString()}`;
+			}
+			
+			const response = await this.request<{ value: MicrosoftGraphEvent[]; '@odata.nextLink'?: string }>(endpoint);
+			
+			allEvents.push(...response.value);
+			nextLink = response['@odata.nextLink'] || null;
+			
+			if (!nextLink) break;
+		}
+
+		return { value: allEvents };
+	}
+
+	/**
+	 * Create event for a specific user
+	 */
+	async createEventForUser(
+		userEmail: string,
+		event: CreateEventRequest & { senderName?: string; senderEmail?: string; isOnlineMeeting?: boolean }
+	): Promise<MicrosoftGraphEvent> {
+		const userId = await this.getUserIdByEmail(userEmail);
+		
+		const graphEvent: MicrosoftGraphEvent = {
+			subject: event.subject,
+			start: {
+				dateTime: event.start,
+				timeZone: event.timeZone || 'Eastern Standard Time',
+			},
+			end: {
+				dateTime: event.end,
+				timeZone: event.timeZone || 'Eastern Standard Time',
+			},
+			isAllDay: event.isAllDay || false,
+		};
+
+		// Add Teams meeting if requested
+		if (event.isOnlineMeeting) {
+			(graphEvent as any).isOnlineMeeting = true;
+			(graphEvent as any).onlineMeetingProvider = 'teamsForBusiness';
+		}
+
+		// Build body with sender info
+		let bodyContent = '';
+		if (event.senderName && event.senderEmail) {
+			bodyContent = `<p><strong>Booked by:</strong> ${event.senderName} (${event.senderEmail})</p>`;
+		}
+		if (event.body) {
+			bodyContent += bodyContent ? `<br>${event.body}` : event.body;
+		}
+
+		if (bodyContent) {
+			graphEvent.body = {
+				contentType: 'html',
+				content: bodyContent,
+			};
+		}
+
+		// Build attendees list - always include sender
+		const attendeesList: any[] = [];
+		if (event.senderEmail) {
+			attendeesList.push({
+				emailAddress: { address: event.senderEmail },
+				type: 'required',
+			});
+		}
+
+		if (event.attendees && event.attendees.length > 0) {
+			for (const email of event.attendees) {
+				if (email.toLowerCase() !== event.senderEmail?.toLowerCase()) {
+					attendeesList.push({
+						emailAddress: { address: email },
+						type: 'required',
+					});
+				}
+			}
+		}
+
+		if (attendeesList.length > 0) {
+			graphEvent.attendees = attendeesList;
+		}
+
+		return this.request<MicrosoftGraphEvent>(`/users/${userId}/events`, {
+			method: 'POST',
+			body: JSON.stringify(graphEvent),
+		});
+	}
+
+	/**
+	 * Get calendar events within a date range
+	 */
+	async getCalendarView(
+		calendarId: string = 'calendar',
+		params: MicrosoftGraphCalendarViewParams
+	): Promise<{ value: MicrosoftGraphEvent[] }> {
+		const queryParams = new URLSearchParams({
+			startDateTime: params.startDateTime,
+			endDateTime: params.endDateTime,
+		});
+
+		if (params.$select) queryParams.append('$select', params.$select);
+		if (params.$filter) queryParams.append('$filter', params.$filter);
+		if (params.$orderby) queryParams.append('$orderby', params.$orderby);
+		if (params.$top) queryParams.append('$top', params.$top.toString());
+
+		const endpoint = calendarId === 'calendar'
+			? `/me/calendar/calendarView?${queryParams.toString()}`
+			: `/me/calendars/${calendarId}/calendarView?${queryParams.toString()}`;
+
+		return this.request<{ value: MicrosoftGraphEvent[] }>(endpoint);
+	}
+
+	/**
+	 * Get free/busy information for calendars
+	 */
+	async getFreeBusy(
+		request: MicrosoftGraphFreeBusyRequest
+	): Promise<MicrosoftGraphFreeBusyResponse> {
+		return this.request<MicrosoftGraphFreeBusyResponse>('/me/calendar/getFreeBusy', {
+			method: 'POST',
+			body: JSON.stringify(request),
+		});
+	}
+
+	/**
+	 * Create a new calendar event
+	 */
+	async createEvent(
+		calendarId: string = 'calendar',
+		event: CreateEventRequest
+	): Promise<MicrosoftGraphEvent> {
+		const graphEvent: MicrosoftGraphEvent = {
+			subject: event.subject,
+			start: {
+				dateTime: event.start,
+				timeZone: event.timeZone || 'UTC',
+			},
+			end: {
+				dateTime: event.end,
+				timeZone: event.timeZone || 'UTC',
+			},
+			isAllDay: event.isAllDay || false,
+		};
+
+		if (event.body) {
+			graphEvent.body = {
+				contentType: 'text',
+				content: event.body,
+			};
+		}
+
+		if (event.location) {
+			graphEvent.location = {
+				displayName: event.location,
+			};
+		}
+
+		if (event.attendees && event.attendees.length > 0) {
+			graphEvent.attendees = event.attendees.map((email) => ({
+				emailAddress: {
+					address: email,
+				},
+				type: 'required',
+			}));
+		}
+
+		const endpoint = calendarId === 'calendar'
+			? '/me/calendar/events'
+			: `/me/calendars/${calendarId}/events`;
+
+		return this.request<MicrosoftGraphEvent>(endpoint, {
+			method: 'POST',
+			body: JSON.stringify(graphEvent),
+		});
+	}
+
+	/**
+	 * Update an existing calendar event
+	 */
+	async updateEvent(
+		eventId: string,
+		updates: Partial<MicrosoftGraphEvent>
+	): Promise<MicrosoftGraphEvent> {
+		return this.request<MicrosoftGraphEvent>(`/me/calendar/events/${eventId}`, {
+			method: 'PATCH',
+			body: JSON.stringify(updates),
+		});
+	}
+
+	/**
+	 * Delete a calendar event
+	 */
+	async deleteEvent(eventId: string): Promise<void> {
+		await this.request(`/me/calendar/events/${eventId}`, {
+			method: 'DELETE',
+		});
+	}
+
+	/**
+	 * Get available time slots for a date range
+	 */
+	async getAvailableSlots(
+		startDate: string,
+		endDate: string,
+		durationMinutes: number = 30,
+		timeZone: string = 'UTC'
+	): Promise<Array<{ start: string; end: string }>> {
+		// Get free/busy information
+		const freeBusyRequest: MicrosoftGraphFreeBusyRequest = {
+			schedules: ['calendar'],
+			startTime: {
+				dateTime: startDate,
+				timeZone,
+			},
+			endTime: {
+				dateTime: endDate,
+				timeZone,
+			},
+			availabilityViewInterval: durationMinutes,
+		};
+
+		const freeBusyResponse = await this.getFreeBusy(freeBusyRequest);
+		
+		if (!freeBusyResponse.value || freeBusyResponse.value.length === 0) {
+			return [];
+		}
+
+		const schedule = freeBusyResponse.value[0];
+		const availableSlots: Array<{ start: string; end: string }> = [];
+
+		// Parse availability view to find free slots
+		// The availabilityView is a string where each character represents a time slot
+		// '0' = free, '1' = tentative, '2' = busy, '3' = OOF, '4' = working elsewhere
+		const start = new Date(startDate);
+		const end = new Date(endDate);
+		const intervalMs = durationMinutes * 60 * 1000;
+
+		for (let current = new Date(start); current < end; current = new Date(current.getTime() + intervalMs)) {
+			const slotEnd = new Date(current.getTime() + intervalMs);
+			
+			// Check if this slot overlaps with any busy times
+			const isBusy = schedule.scheduleItems?.some((item) => {
+				const itemStart = new Date(item.start.dateTime);
+				const itemEnd = new Date(item.end.dateTime);
+				return (
+					(current >= itemStart && current < itemEnd) ||
+					(slotEnd > itemStart && slotEnd <= itemEnd) ||
+					(current <= itemStart && slotEnd >= itemEnd)
+				);
+			});
+
+			if (!isBusy) {
+				availableSlots.push({
+					start: current.toISOString(),
+					end: slotEnd.toISOString(),
+				});
+			}
+		}
+
+		return availableSlots;
+	}
+}
