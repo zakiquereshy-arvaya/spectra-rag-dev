@@ -2,8 +2,9 @@
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import Sidebar from '$lib/components/Sidebar.svelte';
+	import type { LayoutData } from './$types';
 
-	let { children } = $props();
+	let { children, data }: { children: any; data: LayoutData } = $props();
 
 	let sidebarOpen = $state(false);
 </script>
@@ -11,7 +12,7 @@
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
 <div class="flex min-h-screen">
-	<Sidebar bind:isOpen={sidebarOpen} />
+	<Sidebar bind:isOpen={sidebarOpen} session={data.session} />
 	
 	<!-- Main Content -->
 	<main class="flex-1 lg:ml-64">
