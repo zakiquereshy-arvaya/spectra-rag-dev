@@ -36,7 +36,16 @@ export class RAGService {
 				'embed-english-v3.0',
 				'search_query'
 			);
+
+			// Validate embeddings response
+			if (!queryEmbeddings || !Array.isArray(queryEmbeddings) || queryEmbeddings.length === 0) {
+				throw new Error('Failed to generate embeddings: empty or invalid response from Cohere');
+			}
+
 			const queryVector = queryEmbeddings[0];
+			if (!queryVector || !Array.isArray(queryVector)) {
+				throw new Error('Failed to generate embeddings: invalid vector format');
+			}
 
 			console.log('Query embedded, vector length:', queryVector.length);
 

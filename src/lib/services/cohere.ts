@@ -29,7 +29,34 @@ export class CohereService {
 				inputType: inputType,
 			});
 
-			return response.embeddings;
+			// Handle different response types:
+			// - EmbedFloatsResponse: embeddings is number[][]
+			// - EmbedByTypeResponse: embeddings is object with float/int8/etc properties
+			let embeddings: number[][];
+
+			if (Array.isArray(response.embeddings)) {
+				// Direct array format (EmbedFloatsResponse)
+				embeddings = response.embeddings;
+			} else if (response.embeddings && typeof response.embeddings === 'object') {
+				// Object format (EmbedByTypeResponse) - extract float embeddings
+				const embeddingsByType = response.embeddings as any;
+				if (embeddingsByType.float && Array.isArray(embeddingsByType.float)) {
+					embeddings = embeddingsByType.float;
+				} else {
+					console.error('Cohere embed response missing float embeddings:', response.embeddings);
+					throw new Error('Cohere embed API returned invalid response: missing float embeddings');
+				}
+			} else {
+				console.error('Cohere embed response has invalid embeddings structure:', response);
+				throw new Error('Cohere embed API returned invalid response: unexpected embeddings format');
+			}
+
+			if (!embeddings || embeddings.length === 0) {
+				console.error('Cohere embed response has empty embeddings:', embeddings);
+				throw new Error('Cohere embed API returned empty embeddings array');
+			}
+
+			return embeddings;
 		} catch (error: any) {
 			console.error('Cohere embed error:', error);
 			throw new Error(`Cohere embed API error: ${error.message || 'Unknown error'}`);
