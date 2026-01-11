@@ -428,18 +428,11 @@ export class MCPServer {
 						user_email = targetUser.email;
 					}
 
-					// Parse and validate datetime format
-					// Handle natural language times like "9", "9:30", "9 AM", "9:30 PM"
-					// If only time is provided, assume today's date
-					let startDt: Date;
-					let endDt: Date;
-
-					// Helper to parse time strings like "9", "930", "9:30", "9 AM", "9:30 PM"
-					const parseTimeString = (timeStr: string, baseDate: Date): Date => {
+					const parseTimeInEastern = (timeStr: string, dateStr: string): string => {
 						const trimmed = timeStr.trim();
 						
 						if (trimmed.includes('T') || trimmed.match(/^\d{4}-\d{2}-\d{2}/)) {
-							return new Date(trimmed);
+							return trimmed;
 						}
 						
 						let normalized = trimmed;
@@ -455,30 +448,38 @@ export class MCPServer {
 						if (timeMatch) {
 							let hours = parseInt(timeMatch[1], 10);
 							const minutes = parseInt(timeMatch[2] || '0', 10);
-							const period = timeMatch[3]?.toUpperCase();
+							let period = timeMatch[3]?.toUpperCase();
 							
 							if (!period) {
-								if (hours >= 12) {
-									hours = hours === 12 ? 12 : hours;
+								if (hours >= 1 && hours <= 11) {
+									period = 'AM';
+								} else if (hours === 12) {
+									period = 'PM';
+								} else if (hours >= 13 && hours <= 23) {
+									period = 'PM';
+									hours -= 12;
+								} else {
+									period = 'AM';
 								}
 							} else {
 								if (period === 'PM' && hours !== 12) hours += 12;
 								else if (period === 'AM' && hours === 12) hours = 0;
 							}
 							
-							const result = new Date(baseDate);
-							result.setHours(hours, minutes, 0, 0);
-							return result;
+							const hoursStr = hours.toString().padStart(2, '0');
+							const minutesStr = minutes.toString().padStart(2, '0');
+							return `${dateStr}T${hoursStr}:${minutesStr}:00`;
 						}
 						
-						return new Date(trimmed);
+						return trimmed;
 					};
 
-					const baseDate = this.lastAvailabilityDate 
-						? new Date(this.lastAvailabilityDate + 'T00:00:00')
-						: new Date();
-					startDt = parseTimeString(start_datetime, baseDate);
-					endDt = parseTimeString(end_datetime, startDt);
+					const dateStr = this.lastAvailabilityDate || new Date().toISOString().split('T')[0];
+					const startDateTimeStr = parseTimeInEastern(start_datetime, dateStr);
+					const endDateTimeStr = parseTimeInEastern(end_datetime, dateStr);
+					
+					const startDt = new Date(startDateTimeStr + '-05:00');
+					const endDt = new Date(endDateTimeStr + '-05:00');
 					
 					if (isNaN(startDt.getTime()) || isNaN(endDt.getTime())) {
 						throw new Error(`Invalid datetime format. Received start: "${start_datetime}", end: "${end_datetime}". Use YYYY-MM-DDTHH:MM:SS format or time like "9:00 AM".`);
@@ -488,8 +489,8 @@ export class MCPServer {
 						throw new Error('End time must be after start time');
 					}
 
-					const startISO = startDt.toISOString();
-					const endISO = endDt.toISOString();
+					const startISO = startDateTimeStr;
+					const endISO = endDateTimeStr;
 
 					const event = await this.graphService.createEventForUser(user_email, {
 						subject,
@@ -503,10 +504,26 @@ export class MCPServer {
 						isOnlineMeeting: true,
 					});
 
-					const dayOfWeek = startDt.toLocaleDateString('en-US', { weekday: 'long' });
-					const dateFormatted = startDt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-					const startTime = startDt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-					const endTime = endDt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+					const dayOfWeek = startDt.toLocaleDateString('en-US', { 
+						weekday: 'long',
+						timeZone: 'America/New_York'
+					});
+					const dateFormatted = startDt.toLocaleDateString('en-US', { 
+						month: 'long', 
+						day: 'numeric', 
+						year: 'numeric',
+						timeZone: 'America/New_York'
+					});
+					const startTime = startDt.toLocaleTimeString('en-US', { 
+						hour: 'numeric', 
+						minute: '2-digit',
+						timeZone: 'America/New_York'
+					});
+					const endTime = endDt.toLocaleTimeString('en-US', { 
+						hour: 'numeric', 
+						minute: '2-digit',
+						timeZone: 'America/New_York'
+					});
 					const durationMinutes = Math.round((endDt.getTime() - startDt.getTime()) / 60000);
 
 					const teamsLink = (event as any).onlineMeeting?.joinUrl || null;
