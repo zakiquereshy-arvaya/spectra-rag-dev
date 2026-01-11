@@ -13,8 +13,8 @@
 
 	const navItems = [
 		{ href: '/', label: 'Home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
-		{ href: '/spectra-job', label: 'RAG Agent', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
-		{ href: '/appointments', label: 'Appointments (Beta)', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+		{ href: '/spectra-job', label: 'Spectra Project Assistant', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
+		{ href: '/appointments', label: 'Appointments (DO NOT USE IN DEV)', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
 	];
 
 	function isActive(href: string): boolean {
@@ -56,7 +56,7 @@
 		<!-- Sidebar Header -->
 		<div class="p-6 border-b border-gray-200 dark:border-gray-800">
 			<div class="flex items-center justify-between">
-				<h2 class="text-xl font-bold text-gray-900 dark:text-white">Spectra</h2>
+				<h2 class="text-xl font-bold text-gray-900 dark:text-white">Arvaya AI & Automations Consulting</h2>
 				<button
 					onclick={() => (isOpen = false)}
 					class="lg:hidden text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
@@ -77,7 +77,7 @@
 					</svg>
 				</button>
 			</div>
-			<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">RAG Development</p>
+			<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Zaki Dev Portal</p>
 		</div>
 
 		<!-- Navigation -->

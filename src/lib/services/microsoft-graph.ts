@@ -106,11 +106,58 @@ export class MicrosoftGraphService {
 
 	/**
 	 * List all users in the organization
+	 * Handles pagination to get all users
 	 */
 	async listUsers(): Promise<{ value: Array<{ id: string; displayName: string; mail?: string; userPrincipalName: string }> }> {
-		return this.request<{ value: Array<{ id: string; displayName: string; mail?: string; userPrincipalName: string }> }>(
-			'/users?$select=id,displayName,mail,userPrincipalName'
-		);
+		const allUsers: Array<{ id: string; displayName: string; mail?: string; userPrincipalName: string }> = [];
+		let nextLink: string | null = null;
+		let pageCount = 0;
+		const maxPages = 50; // Safety limit
+
+		while (pageCount < maxPages) {
+			let endpoint: string;
+			if (nextLink) {
+				// Handle full URL or relative path
+				if (nextLink.startsWith('http://') || nextLink.startsWith('https://')) {
+					const token = await this.getToken();
+					const fetchResponse = await fetch(nextLink, {
+						headers: {
+							'Authorization': `Bearer ${token}`,
+							'Content-Type': 'application/json',
+						},
+					});
+
+					if (!fetchResponse.ok) {
+						throw new Error(`Failed to fetch users: ${fetchResponse.status} ${fetchResponse.statusText}`);
+					}
+
+					const pageData: { value: Array<{ id: string; displayName: string; mail?: string; userPrincipalName: string }>; '@odata.nextLink'?: string } = await fetchResponse.json();
+					allUsers.push(...(pageData.value || []));
+					nextLink = pageData['@odata.nextLink'] || null;
+				} else {
+					endpoint = nextLink.startsWith('/') ? nextLink : `/${nextLink}`;
+					const response = await this.request<{ value: Array<{ id: string; displayName: string; mail?: string; userPrincipalName: string }>; '@odata.nextLink'?: string }>(endpoint);
+					allUsers.push(...response.value);
+					nextLink = response['@odata.nextLink'] || null;
+				}
+			} else {
+				// First page
+				endpoint = '/users?$select=id,displayName,mail,userPrincipalName&$top=999';
+				const response = await this.request<{ value: Array<{ id: string; displayName: string; mail?: string; userPrincipalName: string }>; '@odata.nextLink'?: string }>(endpoint);
+				allUsers.push(...response.value);
+				nextLink = response['@odata.nextLink'] || null;
+			}
+
+			pageCount++;
+			if (!nextLink) break;
+		}
+
+		if (pageCount >= maxPages && nextLink) {
+			console.warn(`Reached maximum page limit (${maxPages}) for listUsers. There may be more users available.`);
+		}
+
+		console.log(`Retrieved ${allUsers.length} total users from ${pageCount} page(s)`);
+		return { value: allUsers };
 	}
 
 	/**
@@ -150,6 +197,7 @@ export class MicrosoftGraphService {
 			startDateTime,
 			endDateTime,
 			$select: 'subject,start,end,isAllDay,showAs',
+			$top: '1000', // Request more items per page to reduce pagination rounds
 		});
 
 		// Get user ID by email
@@ -158,26 +206,76 @@ export class MicrosoftGraphService {
 		// Use /users/{userId}/calendarView endpoint (works with app-only permissions)
 		const allEvents: MicrosoftGraphEvent[] = [];
 		let nextLink: string | null = null;
+		let pageCount = 0;
+		const maxPages = 50; // Safety limit to prevent infinite loops
 
-		while (true) {
+		while (pageCount < maxPages) {
 			let endpoint: string;
 			if (nextLink) {
-				// Remove the base URL if present
-				endpoint = nextLink.startsWith(GRAPH_API_BASE) 
-					? nextLink.replace(GRAPH_API_BASE, '')
-					: nextLink;
+				// If nextLink is a full URL, use it directly; otherwise prepend base
+				if (nextLink.startsWith('http://') || nextLink.startsWith('https://')) {
+					// Full URL - make direct request
+					const token = await this.getToken();
+					const fetchResponse = await fetch(nextLink, {
+						headers: {
+							'Authorization': `Bearer ${token}`,
+							'Content-Type': 'application/json',
+						},
+					});
+
+					if (!fetchResponse.ok) {
+						const errorText = await fetchResponse.text();
+						let error: any;
+						try {
+							error = JSON.parse(errorText);
+						} catch {
+							error = { message: errorText || fetchResponse.statusText };
+						}
+						
+						console.error('Microsoft Graph API pagination error:', {
+							status: fetchResponse.status,
+							statusText: fetchResponse.statusText,
+							endpoint: nextLink,
+							error: error,
+						});
+						
+						const errorMessage = error.error?.message || error.message || errorText || fetchResponse.statusText;
+						const errorCode = error.error?.code || error.code || '';
+						
+						throw new Error(
+							`Microsoft Graph API error (${fetchResponse.status}${errorCode ? ` - ${errorCode}` : ''}): ${errorMessage}`
+						);
+					}
+
+					const pageData: { value: MicrosoftGraphEvent[]; '@odata.nextLink'?: string } = await fetchResponse.json();
+					allEvents.push(...(pageData.value || []));
+					nextLink = pageData['@odata.nextLink'] || null;
+				} else {
+					// Relative path - use request method
+					endpoint = nextLink.startsWith('/') ? nextLink : `/${nextLink}`;
+					const response = await this.request<{ value: MicrosoftGraphEvent[]; '@odata.nextLink'?: string }>(endpoint);
+					allEvents.push(...response.value);
+					nextLink = response['@odata.nextLink'] || null;
+				}
 			} else {
+				// First page
 				endpoint = `/users/${userId}/calendarView?${queryParams.toString()}`;
+				const response = await this.request<{ value: MicrosoftGraphEvent[]; '@odata.nextLink'?: string }>(endpoint);
+				allEvents.push(...response.value);
+				nextLink = response['@odata.nextLink'] || null;
 			}
 			
-			const response = await this.request<{ value: MicrosoftGraphEvent[]; '@odata.nextLink'?: string }>(endpoint);
-			
-			allEvents.push(...response.value);
-			nextLink = response['@odata.nextLink'] || null;
+			pageCount++;
+			console.log(`Calendar view page ${pageCount}: ${allEvents.length} total events so far${nextLink ? ' (more pages available)' : ' (last page)'}`);
 			
 			if (!nextLink) break;
 		}
 
+		if (pageCount >= maxPages && nextLink) {
+			console.warn(`Reached maximum page limit (${maxPages}) for calendar view. There may be more events available.`);
+		}
+
+		console.log(`Retrieved ${allEvents.length} total events for ${userEmail} from ${pageCount} page(s)`);
 		return { value: allEvents };
 	}
 

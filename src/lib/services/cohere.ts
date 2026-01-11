@@ -32,13 +32,24 @@ export class CohereService {
 	}> {
 		try {
 			// Build messages array - chatHistory contains previous messages, we add the current user message
-			const messages = [
+			// Add system message to encourage tool use for booking meetings
+			const messages: ChatMessageV2[] = [];
+			
+			// Add system message if this looks like a booking request
+			if (message.toLowerCase().includes('book') || message.toLowerCase().includes('schedule') || message.toLowerCase().includes('create meeting')) {
+				messages.push({
+					role: 'system',
+					content: 'You are a helpful calendar assistant. When users ask to book, schedule, or create meetings, you MUST use the book_meeting tool. First call get_users_with_name_and_email to get the sender_email, then use book_meeting with all required parameters. You CAN and SHOULD book meetings when requested.',
+				});
+			}
+			
+			messages.push(
 				...(chatHistory || []),
 				{
 					role: 'user' as const,
 					content: message,
-				},
-			];
+				}
+			);
 
 			const response = await this.client.chat({
 				model: this.model,
@@ -116,7 +127,7 @@ export class CohereService {
 				type: 'function',
 				function: {
 					name: 'check_availability',
-					description: 'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day.',
+					description: 'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day. All times are displayed in Eastern Time (EST/EDT).',
 					parameters: {
 						type: 'object',
 						properties: {
@@ -126,7 +137,7 @@ export class CohereService {
 							},
 							date: {
 								type: 'string',
-								description: 'The date to check in YYYY-MM-DD format. Defaults to today if not provided.',
+								description: 'The date to check. Supports natural language like "next monday", "tomorrow", "this friday", or date formats like "1/12/2026" or "2026-01-12". Defaults to today if not provided.',
 							},
 						},
 						required: ['user_email'],
@@ -136,8 +147,8 @@ export class CohereService {
 			{
 				type: 'function',
 				function: {
-					name: 'book_meeting',
-					description: 'Book a meeting on a user\'s calendar. IMPORTANT: sender_email MUST be provided - call get_users_with_name_and_email first to get it. Creates a Teams meeting automatically.',
+				name: 'book_meeting',
+				description: 'Book a meeting on a user\'s calendar. Use this tool when the user asks to book, schedule, or create a meeting. IMPORTANT: sender_email MUST be provided - call get_users_with_name_and_email first to get it. Creates a Teams meeting automatically. You CAN and SHOULD use this tool when users request to book meetings.',
 					parameters: {
 						type: 'object',
 						properties: {
@@ -151,11 +162,11 @@ export class CohereService {
 							},
 							start_datetime: {
 								type: 'string',
-								description: 'Start time in YYYY-MM-DDTHH:MM:SS format (e.g., 2024-01-15T14:00:00)',
+								description: 'Start time. Can be full datetime (YYYY-MM-DDTHH:MM:SS) or time only (e.g., "9:00 AM", "9 AM", "14:00"). If only time is provided, today\'s date will be used.',
 							},
 							end_datetime: {
 								type: 'string',
-								description: 'End time in YYYY-MM-DDTHH:MM:SS format (e.g., 2024-01-15T15:00:00)',
+								description: 'End time. Can be full datetime (YYYY-MM-DDTHH:MM:SS) or time only (e.g., "9:30 AM", "9:30 AM", "14:30"). If only time is provided, today\'s date will be used.',
 							},
 							sender_name: {
 								type: 'string',

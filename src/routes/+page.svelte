@@ -21,7 +21,7 @@
 				<!-- Login Section -->
 				<h1 class="text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-6">
 					Welcome to
-					<span class="text-blue-600 dark:text-blue-400">Spectra RAG</span>
+					<span class="text-blue-600 dark:text-blue-400">Arvaya's AI Project Development Portal</span>
 				</h1>
 				<p class="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
 					Please sign in with your Microsoft account to continue.
@@ -43,7 +43,7 @@
 					<span class="text-blue-600 dark:text-blue-400">Development</span>
 				</h1>
 				<p class="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
-					The Vector Database and Search and Rank is the lifeblood of Spectra's new smart recruitment engine.
+					The Vector Database and Search and Rank is the lifeblood of Spectra's new smart recruitment engine. This is the current endeavor
 				</p>
 				<p class="text-lg text-gray-500 dark:text-gray-400 mb-12 max-w-2xl mx-auto">
 					Instead of tying you to services piece by piece with multiple menus, we store everything in our vector database (AI-Native Database) where you can search for the best candidate across all platforms, unified together in one chat.
