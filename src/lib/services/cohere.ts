@@ -148,37 +148,29 @@ export class CohereService {
 				type: 'function',
 				function: {
 				name: 'book_meeting',
-				description: 'Book a meeting on a user\'s calendar. Use this tool when the user asks to book, schedule, or create a meeting. IMPORTANT: sender_email MUST be provided - call get_users_with_name_and_email first to get it. Creates a Teams meeting automatically. You CAN and SHOULD use this tool when users request to book meetings.',
+				description: 'Book a meeting on a user\'s calendar. Use this tool when the user asks to book, schedule, or create a meeting. The sender (person booking) is automatically set to the logged-in user. IMPORTANT: If the user does not provide a subject, you MUST ask them "What is the subject/title of this meeting?" before calling this tool. If they want to invite additional attendees, ask for their email addresses. Creates a Teams meeting automatically. The recipient will receive a calendar invitation they can accept.',
 					parameters: {
 						type: 'object',
 						properties: {
 							user_email: {
 								type: 'string',
-								description: 'The email address or display name of the user whose calendar to book on. If a name is provided, it will be matched against users from get_users_with_name_and_email.',
+								description: 'The email address or display name of the user whose calendar to book on (the recipient). If a name is provided, it will be matched against users from get_users_with_name_and_email.',
 							},
 							subject: {
 								type: 'string',
-								description: 'The subject/title of the meeting',
+								description: 'REQUIRED - The subject/title of the meeting. If the user has not provided this, you MUST ask them for it before calling this tool.',
 							},
 							start_datetime: {
 								type: 'string',
-								description: 'Start time. Can be full datetime (YYYY-MM-DDTHH:MM:SS) or time only (e.g., "9:00 AM", "9 AM", "14:00"). If only time is provided, today\'s date will be used.',
+								description: 'Start time. Can be full datetime (YYYY-MM-DDTHH:MM:SS) or time only (e.g., "9:00 AM", "9 AM", "930"). If only time is provided, the date from the most recent availability check will be used, or today if no availability was checked.',
 							},
 							end_datetime: {
 								type: 'string',
-								description: 'End time. Can be full datetime (YYYY-MM-DDTHH:MM:SS) or time only (e.g., "9:30 AM", "9:30 AM", "14:30"). If only time is provided, today\'s date will be used.',
-							},
-							sender_name: {
-								type: 'string',
-								description: 'The display name of the person booking the meeting',
-							},
-							sender_email: {
-								type: 'string',
-								description: 'REQUIRED - The email address of the person booking the meeting. Must be obtained from get_users_with_name_and_email first.',
+								description: 'End time. Can be full datetime (YYYY-MM-DDTHH:MM:SS) or time only (e.g., "9:30 AM", "930 AM"). If only time is provided, the date from the most recent availability check will be used, or today if no availability was checked.',
 							},
 							attendees: {
 								type: 'array',
-								description: 'Optional list of attendee email addresses',
+								description: 'Optional list of additional attendee email addresses to invite. If the user mentions other people to invite, ask for their email addresses.',
 								items: {
 									type: 'string',
 								},
@@ -188,7 +180,7 @@ export class CohereService {
 								description: 'Optional meeting body/description',
 							},
 						},
-						required: ['user_email', 'subject', 'start_datetime', 'end_datetime', 'sender_name', 'sender_email'],
+						required: ['user_email', 'subject', 'start_datetime', 'end_datetime'],
 					},
 				},
 			},

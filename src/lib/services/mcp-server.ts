@@ -20,6 +20,8 @@ export class MCPServer {
 	private aiHelper: CalendarAIHelper | null;
 	private sessionId: string;
 	private chatHistory: ChatMessageV2[] = [];
+	private loggedInUser: { name: string; email: string } | null = null;
+	private lastAvailabilityDate: string | null = null;
 
 	/**
 	 * Parse natural language date strings like "next monday", "tomorrow", "1/12/2026"
@@ -174,7 +176,8 @@ export class MCPServer {
 		cohereApiKey: string,
 		sessionId: string,
 		authService?: MicrosoftGraphAuth,
-		accessToken?: string
+		accessToken?: string,
+		loggedInUser?: { name: string; email: string }
 	) {
 		this.graphService = new MicrosoftGraphService(accessToken, authService);
 		this.cohereService = new CohereService(cohereApiKey);
@@ -186,6 +189,7 @@ export class MCPServer {
 		}
 		this.sessionId = sessionId;
 		this.chatHistory = getChatHistory(sessionId);
+		this.loggedInUser = loggedInUser || null;
 	}
 
 	/**
@@ -373,22 +377,25 @@ export class MCPServer {
 						subject,
 						start_datetime,
 						end_datetime,
-						sender_name,
-						sender_email,
 						attendees,
 						body,
 					} = args;
 
-					if (!sender_email || !sender_email.trim()) {
+					if (!subject || !subject.trim()) {
 						throw new Error(
-							'sender_email is REQUIRED. Please call get_users_with_name_and_email first to get the sender\'s email address.'
+							'Meeting subject is REQUIRED. Please ask the user for the meeting subject/title before booking.'
+						);
+					}
+
+					if (!this.loggedInUser) {
+						throw new Error(
+							'No logged-in user information available. Please ensure you are authenticated.'
 						);
 					}
 
 					if (!this.aiHelper) {
 						throw new Error(
-							'AI helper not available. Please ensure Cohere API is configured. ' +
-								'sender_email validation requires AI.'
+							'AI helper not available. Please ensure Cohere API is configured.'
 						);
 					}
 
@@ -398,7 +405,11 @@ export class MCPServer {
 						email: u.mail || u.userPrincipalName,
 					}));
 
-					const senderUser = await this.aiHelper.validateSender(sender_name, sender_email, usersList);
+					const senderUser = await this.aiHelper.validateSender(
+						this.loggedInUser.name,
+						this.loggedInUser.email,
+						usersList
+					);
 					const validatedSenderEmail = senderUser.email;
 					const validatedSenderName = senderUser.name;
 
@@ -417,18 +428,11 @@ export class MCPServer {
 						user_email = targetUser.email;
 					}
 
-					// Parse and validate datetime format
-					// Handle natural language times like "9", "9:30", "9 AM", "9:30 PM"
-					// If only time is provided, assume today's date
-					let startDt: Date;
-					let endDt: Date;
-
-					// Helper to parse time strings like "9", "930", "9:30", "9 AM", "9:30 PM"
-					const parseTimeString = (timeStr: string, baseDate: Date): Date => {
+					const parseTimeInEastern = (timeStr: string, dateStr: string): string => {
 						const trimmed = timeStr.trim();
 						
 						if (trimmed.includes('T') || trimmed.match(/^\d{4}-\d{2}-\d{2}/)) {
-							return new Date(trimmed);
+							return trimmed;
 						}
 						
 						let normalized = trimmed;
@@ -444,28 +448,38 @@ export class MCPServer {
 						if (timeMatch) {
 							let hours = parseInt(timeMatch[1], 10);
 							const minutes = parseInt(timeMatch[2] || '0', 10);
-							const period = timeMatch[3]?.toUpperCase();
+							let period = timeMatch[3]?.toUpperCase();
 							
 							if (!period) {
-								if (hours >= 12) {
-									hours = hours === 12 ? 12 : hours;
+								if (hours >= 1 && hours <= 11) {
+									period = 'AM';
+								} else if (hours === 12) {
+									period = 'PM';
+								} else if (hours >= 13 && hours <= 23) {
+									period = 'PM';
+									hours -= 12;
+								} else {
+									period = 'AM';
 								}
 							} else {
 								if (period === 'PM' && hours !== 12) hours += 12;
 								else if (period === 'AM' && hours === 12) hours = 0;
 							}
 							
-							const result = new Date(baseDate);
-							result.setHours(hours, minutes, 0, 0);
-							return result;
+							const hoursStr = hours.toString().padStart(2, '0');
+							const minutesStr = minutes.toString().padStart(2, '0');
+							return `${dateStr}T${hoursStr}:${minutesStr}:00`;
 						}
 						
-						return new Date(trimmed);
+						return trimmed;
 					};
 
-					const today = new Date();
-					startDt = parseTimeString(start_datetime, today);
-					endDt = parseTimeString(end_datetime, startDt);
+					const dateStr = this.lastAvailabilityDate || new Date().toISOString().split('T')[0];
+					const startDateTimeStr = parseTimeInEastern(start_datetime, dateStr);
+					const endDateTimeStr = parseTimeInEastern(end_datetime, dateStr);
+					
+					const startDt = new Date(startDateTimeStr + '-05:00');
+					const endDt = new Date(endDateTimeStr + '-05:00');
 					
 					if (isNaN(startDt.getTime()) || isNaN(endDt.getTime())) {
 						throw new Error(`Invalid datetime format. Received start: "${start_datetime}", end: "${end_datetime}". Use YYYY-MM-DDTHH:MM:SS format or time like "9:00 AM".`);
@@ -475,8 +489,8 @@ export class MCPServer {
 						throw new Error('End time must be after start time');
 					}
 
-					const startISO = startDt.toISOString();
-					const endISO = endDt.toISOString();
+					const startISO = startDateTimeStr;
+					const endISO = endDateTimeStr;
 
 					const event = await this.graphService.createEventForUser(user_email, {
 						subject,
@@ -490,10 +504,26 @@ export class MCPServer {
 						isOnlineMeeting: true,
 					});
 
-					const dayOfWeek = startDt.toLocaleDateString('en-US', { weekday: 'long' });
-					const dateFormatted = startDt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-					const startTime = startDt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-					const endTime = endDt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+					const dayOfWeek = startDt.toLocaleDateString('en-US', { 
+						weekday: 'long',
+						timeZone: 'America/New_York'
+					});
+					const dateFormatted = startDt.toLocaleDateString('en-US', { 
+						month: 'long', 
+						day: 'numeric', 
+						year: 'numeric',
+						timeZone: 'America/New_York'
+					});
+					const startTime = startDt.toLocaleTimeString('en-US', { 
+						hour: 'numeric', 
+						minute: '2-digit',
+						timeZone: 'America/New_York'
+					});
+					const endTime = endDt.toLocaleTimeString('en-US', { 
+						hour: 'numeric', 
+						minute: '2-digit',
+						timeZone: 'America/New_York'
+					});
 					const durationMinutes = Math.round((endDt.getTime() - startDt.getTime()) / 60000);
 
 					const teamsLink = (event as any).onlineMeeting?.joinUrl || null;
