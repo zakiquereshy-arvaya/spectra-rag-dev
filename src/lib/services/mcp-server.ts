@@ -72,7 +72,6 @@ export class MCPServer {
 			return nextDate.toISOString().split('T')[0];
 		}
 
-		// Handle "this [day]" patterns
 		const thisDayMatch = lower.match(/this\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
 		if (thisDayMatch) {
 			const dayName = thisDayMatch[1];
@@ -114,10 +113,7 @@ export class MCPServer {
 		return parsedDate.toISOString().split('T')[0];
 	}
 
-	/**
-	 * Convert UTC datetime string to local timezone string
-	 * Returns formatted time like "9:00 AM" or "2:00 PM"
-	 */
+	
 	private convertToLocalTime(utcDateTime: string): string {
 		const date = new Date(utcDateTime);
 		return date.toLocaleTimeString('en-US', {
@@ -128,10 +124,7 @@ export class MCPServer {
 		});
 	}
 
-	/**
-	 * Convert UTC datetime string to local date and time
-	 * Returns formatted string like "Mon 1/12/2026 9:00 AM"
-	 */
+	
 	private formatLocalDateTime(utcDateTime: string): string {
 		const date = new Date(utcDateTime);
 		const dateStr = date.toLocaleDateString('en-US', {
@@ -753,42 +746,67 @@ export class MCPServer {
 				this.chatHistory.push(...toolResults);
 
 				// Get final response from Cohere - respond naturally to the user's question using tool results
-				// Don't ask for summaries, just answer the question directly
+				console.log('Requesting final response from Cohere with chat history length:', this.chatHistory.length);
 				const finalResponse = await this.cohereService.chat(
 					'Based on the tool results above, provide a clear and direct answer to the user\'s question. ' +
 					'If a tool failed (e.g., user not found), you can use get_users_with_name_and_email to find the correct user, then retry the original tool. ' +
 					'Do not summarize actions taken, only provide the requested information.',
 					tools,
 					this.chatHistory,
-					undefined
+					'NONE'
 				);
 
-				// Add final assistant response to chat history
-				if (finalResponse.text && finalResponse.text.trim()) {
-					this.chatHistory.push({
-						role: 'assistant',
-						content: finalResponse.text,
+				console.log('Final response from Cohere:', {
+					hasText: !!finalResponse.text,
+					textLength: finalResponse.text?.length || 0,
+					textPreview: finalResponse.text?.substring(0, 100),
+				});
+
+				let responseText = finalResponse.text?.trim();
+				
+				if (!responseText || responseText.length === 0) {
+					console.warn('Cohere returned empty response, generating fallback');
+					// Generate a helpful response based on tool results
+					const successfulTools = toolResults.filter(tr => {
+						try {
+							const content = typeof tr.content === 'string' ? JSON.parse(tr.content) : tr.content;
+							return content && !content.error && content.success !== false;
+						} catch {
+							return true;
+						}
 					});
+					
+					if (successfulTools.length > 0) {
+						responseText = 'I\'ve processed your request successfully. The information has been retrieved.';
+					} else {
+						responseText = 'I encountered an issue processing your request. Please try again or rephrase your question.';
+					}
 				}
+
+				// Add final assistant response to chat history
+				this.chatHistory.push({
+					role: 'assistant',
+					content: responseText,
+				});
 
 				setChatHistory(this.sessionId, this.chatHistory);
 
-				return finalResponse.text;
+				return responseText;
 			} else {
 				this.chatHistory.push({
 					role: 'user',
 					content: userMessage,
 				});
-				if (response.text && response.text.trim()) {
-					this.chatHistory.push({
-						role: 'assistant',
-						content: response.text,
-					});
-				}
+				const responseText = response.text?.trim() || 'I received your message. How can I help you?';
+				
+				this.chatHistory.push({
+					role: 'assistant',
+					content: responseText,
+				});
 
 				setChatHistory(this.sessionId, this.chatHistory);
 
-				return response.text;
+				return responseText;
 			}
 		} catch (error: any) {
 			throw new Error(`MCP processing error: ${error.message}`);
