@@ -160,9 +160,62 @@ export class MicrosoftGraphService {
 		return { value: allUsers };
 	}
 
-	/**
-	 * Get user ID by email
-	 */
+	async resolveUserNameToEmail(userNameOrEmail: string): Promise<string> {
+		if (userNameOrEmail.includes('@')) {
+			return userNameOrEmail;
+		}
+		
+		const users = await this.listUsers();
+		const nameLower = userNameOrEmail.toLowerCase().trim();
+		const nameParts = nameLower.split(/\s+/).filter(p => p.length > 0);
+		
+		let matchedUser = users.value.find(
+			(u) => u.displayName.toLowerCase() === nameLower
+		);
+		
+		if (!matchedUser) {
+			matchedUser = users.value.find(
+				(u) => {
+					const displayLower = u.displayName.toLowerCase();
+					return displayLower.includes(nameLower) || nameLower.includes(displayLower);
+				}
+			);
+		}
+		
+		if (!matchedUser && nameParts.length > 1) {
+			matchedUser = users.value.find((u) => {
+				const displayLower = u.displayName.toLowerCase();
+				return nameParts.every(part => displayLower.includes(part));
+			});
+		}
+		
+		if (!matchedUser && nameParts.length > 0) {
+			matchedUser = users.value.find(
+				(u) => u.displayName.toLowerCase().startsWith(nameParts[0])
+			);
+		}
+		
+		if (!matchedUser) {
+			const suggestions = users.value
+				.filter(u => {
+					const displayLower = u.displayName.toLowerCase();
+					return nameParts.some(part => displayLower.includes(part));
+				})
+				.slice(0, 5)
+				.map(u => u.displayName);
+			
+			throw new Error(
+				`User '${userNameOrEmail}' not found. ` +
+				(suggestions.length > 0 
+					? `Did you mean: ${suggestions.join(', ')}? ` 
+					: '') +
+				`Please use get_users_with_name_and_email tool first to see all available users.`
+			);
+		}
+		
+		return matchedUser.mail || matchedUser.userPrincipalName;
+	}
+
 	async getUserIdByEmail(email: string): Promise<string> {
 		const users = await this.listUsers();
 		for (const user of users.value) {
@@ -286,7 +339,8 @@ export class MicrosoftGraphService {
 		userEmail: string,
 		event: CreateEventRequest & { senderName?: string; senderEmail?: string; isOnlineMeeting?: boolean }
 	): Promise<MicrosoftGraphEvent> {
-		const userId = await this.getUserIdByEmail(userEmail);
+		const resolvedEmail = await this.resolveUserNameToEmail(userEmail);
+		const userId = await this.getUserIdByEmail(resolvedEmail);
 		
 		const graphEvent: MicrosoftGraphEvent = {
 			subject: event.subject,
@@ -301,13 +355,11 @@ export class MicrosoftGraphService {
 			isAllDay: event.isAllDay || false,
 		};
 
-		// Add Teams meeting if requested
 		if (event.isOnlineMeeting) {
 			(graphEvent as any).isOnlineMeeting = true;
 			(graphEvent as any).onlineMeetingProvider = 'teamsForBusiness';
 		}
 
-		// Build body with sender info
 		let bodyContent = '';
 		if (event.senderName && event.senderEmail) {
 			bodyContent = `<p><strong>Booked by:</strong> ${event.senderName} (${event.senderEmail})</p>`;

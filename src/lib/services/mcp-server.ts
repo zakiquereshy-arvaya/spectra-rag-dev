@@ -286,35 +286,7 @@ export class MCPServer {
 					let userEmail = args.user_email;
 					let date = args.date;
 					
-					// If user_email is a name (doesn't contain @), try to match it
-					if (!userEmail.includes('@')) {
-						const users = await this.graphService.listUsers();
-						const nameLower = userEmail.toLowerCase();
-						
-						// Try exact match first
-						let matchedUser = users.value.find(
-							(u) => u.displayName.toLowerCase() === nameLower
-						);
-						
-						// Try partial match
-						if (!matchedUser) {
-							matchedUser = users.value.find(
-								(u) => u.displayName.toLowerCase().includes(nameLower) || 
-								       nameLower.includes(u.displayName.toLowerCase())
-							);
-						}
-						
-						if (!matchedUser) {
-							const availableNames = users.value.slice(0, 5).map(u => u.displayName);
-							throw new Error(
-								`User '${userEmail}' not found or ambiguous. ` +
-								`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
-								`Example names found: ${availableNames.join(', ')}`
-							);
-						}
-						
-						userEmail = matchedUser.mail || matchedUser.userPrincipalName;
-					}
+					userEmail = await this.graphService.resolveUserNameToEmail(userEmail);
 					
 					// Parse natural language date (handles "next monday", "tomorrow", etc.)
 					const parsedDate = this.parseDate(date);
@@ -334,7 +306,6 @@ export class MCPServer {
 						endDateTime
 					);
 
-					// Extract busy times and convert UTC to local time
 					const busyTimes = events.value
 						.filter((event) => !event.isAllDay)
 						.map((event) => {
@@ -346,12 +317,11 @@ export class MCPServer {
 								end: endLocal,
 								start_datetime: this.formatLocalDateTime(event.start.dateTime),
 								end_datetime: this.formatLocalDateTime(event.end.dateTime),
-								start_utc: event.start.dateTime, // Keep UTC for reference
+								start_utc: event.start.dateTime,
 								end_utc: event.end.dateTime,
 							};
 						});
 
-					// Calculate free slots (9am-5pm business hours) using parsed date
 					const freeSlots = this.calculateFreeSlots(busyTimes, parsedDate);
 
 					const displayDate = new Date(parsedDate + 'T00:00:00');
@@ -390,35 +360,7 @@ export class MCPServer {
 						);
 					}
 
-					// If user_email is a name (doesn't contain @), try to match it
-					if (!user_email.includes('@')) {
-						const users = await this.graphService.listUsers();
-						const nameLower = user_email.toLowerCase();
-						
-						// Try exact match first
-						let matchedUser = users.value.find(
-							(u) => u.displayName.toLowerCase() === nameLower
-						);
-						
-						// Try partial match
-						if (!matchedUser) {
-							matchedUser = users.value.find(
-								(u) => u.displayName.toLowerCase().includes(nameLower) || 
-								       nameLower.includes(u.displayName.toLowerCase())
-							);
-						}
-						
-						if (!matchedUser) {
-							const availableNames = users.value.slice(0, 5).map(u => u.displayName);
-							throw new Error(
-								`User '${user_email}' not found or ambiguous. ` +
-								`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
-								`Example names found: ${availableNames.join(', ')}`
-							);
-						}
-						
-						user_email = matchedUser.mail || matchedUser.userPrincipalName;
-					}
+					user_email = await this.graphService.resolveUserNameToEmail(user_email);
 
 					// Parse and validate datetime format
 					// Handle natural language times like "9", "9:30", "9 AM", "9:30 PM"
@@ -430,15 +372,12 @@ export class MCPServer {
 					const parseTimeString = (timeStr: string, baseDate: Date): Date => {
 						const trimmed = timeStr.trim();
 						
-						// Full datetime format
 						if (trimmed.includes('T') || trimmed.match(/^\d{4}-\d{2}-\d{2}/)) {
 							return new Date(trimmed);
 						}
 						
-						// Handle formats like "930" (no colon) - assume 9:30
 						let normalized = trimmed;
 						if (/^\d{3,4}$/.test(normalized) && !normalized.includes(':')) {
-							// "930" -> "9:30", "930" -> "9:30"
 							if (normalized.length === 3) {
 								normalized = `${normalized[0]}:${normalized.slice(1)}`;
 							} else if (normalized.length === 4) {
@@ -446,14 +385,12 @@ export class MCPServer {
 							}
 						}
 						
-						// Try parsing as "9", "9:30", "9 AM", "9:30 PM"
 						const timeMatch = normalized.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i);
 						if (timeMatch) {
 							let hours = parseInt(timeMatch[1], 10);
 							const minutes = parseInt(timeMatch[2] || '0', 10);
 							const period = timeMatch[3]?.toUpperCase();
 							
-							// Default to AM if no period specified and hours < 12, PM if >= 12
 							if (!period) {
 								if (hours >= 12) {
 									hours = hours === 12 ? 12 : hours;
@@ -468,17 +405,11 @@ export class MCPServer {
 							return result;
 						}
 						
-						// Fallback to native Date parsing
 						return new Date(trimmed);
 					};
 
-					// Try to parse start_datetime
-					// Use today as base date if no date specified
 					const today = new Date();
 					startDt = parseTimeString(start_datetime, today);
-
-					// Try to parse end_datetime
-					// Use same date as start if only time provided
 					endDt = parseTimeString(end_datetime, startDt);
 					
 					if (isNaN(startDt.getTime()) || isNaN(endDt.getTime())) {
@@ -489,7 +420,6 @@ export class MCPServer {
 						throw new Error('End time must be after start time');
 					}
 
-					// Convert to ISO format for Microsoft Graph
 					const startISO = startDt.toISOString();
 					const endISO = endDt.toISOString();
 
@@ -751,12 +681,10 @@ export class MCPServer {
 					content: finalResponse.text,
 				});
 
-				// Persist chat history
 				setChatHistory(this.sessionId, this.chatHistory);
 
 				return finalResponse.text;
 			} else {
-				// No tool calls, add messages to history and return
 				this.chatHistory.push({
 					role: 'user',
 					content: userMessage,
@@ -766,7 +694,6 @@ export class MCPServer {
 					content: response.text,
 				});
 
-				// Persist chat history
 				setChatHistory(this.sessionId, this.chatHistory);
 
 				return response.text;
