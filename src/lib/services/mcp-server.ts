@@ -10,12 +10,14 @@ import type {
 import { MicrosoftGraphService } from './microsoft-graph';
 import { MicrosoftGraphAuth } from './microsoft-graph-auth';
 import { CohereService } from './cohere';
+import { CalendarAIHelper } from './ai-calendar-helpers';
 import type { ChatMessageV2 } from 'cohere-ai/api';
 import { getChatHistory, setChatHistory } from './chat-history-store';
 
 export class MCPServer {
 	private graphService: MicrosoftGraphService;
 	private cohereService: CohereService;
+	private aiHelper: CalendarAIHelper | null;
 	private sessionId: string;
 	private chatHistory: ChatMessageV2[] = [];
 
@@ -181,11 +183,15 @@ export class MCPServer {
 		authService?: MicrosoftGraphAuth,
 		accessToken?: string
 	) {
-		// Use app-only auth (client credentials) if available, otherwise fallback to delegated token
 		this.graphService = new MicrosoftGraphService(accessToken, authService);
 		this.cohereService = new CohereService(cohereApiKey);
+		try {
+			this.aiHelper = new CalendarAIHelper(cohereApiKey);
+		} catch (error) {
+			console.warn('AI helper initialization failed:', error);
+			this.aiHelper = null;
+		}
 		this.sessionId = sessionId;
-		// Load existing chat history for this session
 		this.chatHistory = getChatHistory(sessionId);
 	}
 
@@ -286,7 +292,33 @@ export class MCPServer {
 					let userEmail = args.user_email;
 					let date = args.date;
 					
-					userEmail = await this.graphService.resolveUserNameToEmail(userEmail);
+					if (!userEmail.includes('@')) {
+						if (!this.aiHelper) {
+							throw new Error(
+								'AI helper not available. Please provide user_email as an email address, ' +
+									'or ensure Cohere API is configured.'
+							);
+						}
+						
+						const users = await this.graphService.listUsers();
+						const usersList = users.value.map((u) => ({
+							name: u.displayName,
+							email: u.mail || u.userPrincipalName,
+						}));
+						
+						const targetUser = await this.aiHelper.matchUserName(userEmail, usersList);
+						
+						if (!targetUser) {
+							const availableNames = users.value.slice(0, 5).map((u) => u.displayName);
+							throw new Error(
+								`User '${userEmail}' not found or ambiguous. ` +
+									`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
+									`Example names found: ${availableNames.join(', ')}`
+							);
+						}
+						
+						userEmail = targetUser.email;
+					}
 					
 					// Parse natural language date (handles "next monday", "tomorrow", etc.)
 					const parsedDate = this.parseDate(date);
@@ -360,7 +392,37 @@ export class MCPServer {
 						);
 					}
 
-					user_email = await this.graphService.resolveUserNameToEmail(user_email);
+					if (!this.aiHelper) {
+						throw new Error(
+							'AI helper not available. Please ensure Cohere API is configured. ' +
+								'sender_email validation requires AI.'
+						);
+					}
+
+					const users = await this.graphService.listUsers();
+					const usersList = users.value.map((u) => ({
+						name: u.displayName,
+						email: u.mail || u.userPrincipalName,
+					}));
+
+					const senderUser = await this.aiHelper.validateSender(sender_name, sender_email, usersList);
+					const validatedSenderEmail = senderUser.email;
+					const validatedSenderName = senderUser.name;
+
+					if (!user_email.includes('@')) {
+						const targetUser = await this.aiHelper.matchUserName(user_email, usersList);
+						
+						if (!targetUser) {
+							const availableNames = users.value.slice(0, 5).map((u) => u.displayName);
+							throw new Error(
+								`User '${user_email}' not found or ambiguous. ` +
+									`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
+									`Example names found: ${availableNames.join(', ')}`
+							);
+						}
+						
+						user_email = targetUser.email;
+					}
 
 					// Parse and validate datetime format
 					// Handle natural language times like "9", "9:30", "9 AM", "9:30 PM"
@@ -428,8 +490,8 @@ export class MCPServer {
 						start: startISO,
 						end: endISO,
 						timeZone: 'Eastern Standard Time',
-						senderName: sender_name,
-						senderEmail: sender_email,
+						senderName: validatedSenderName,
+						senderEmail: validatedSenderEmail,
 						attendees: attendees || [],
 						body: body || '',
 						isOnlineMeeting: true,
@@ -458,8 +520,8 @@ export class MCPServer {
 							teams_link: teamsLink,
 							has_teams_link: teamsLink !== null,
 							attendee_emails: attendees || [],
-							sender_name: sender_name,
-							sender_email: sender_email,
+							sender_name: validatedSenderName,
+							sender_email: validatedSenderEmail,
 						},
 					};
 				}
@@ -649,11 +711,16 @@ export class MCPServer {
 							success: false,
 							error: error.message,
 							tool: toolCall.name,
-							suggestion: error.message.includes('403') || error.message.includes('Forbidden') 
+							suggestion: error.message.includes('not found') || error.message.includes('User') || error.message.includes('ambiguous')
+								? 'Try using get_users_with_name_and_email tool first to find the correct user, then retry with the exact email address.'
+								: error.message.includes('403') || error.message.includes('Forbidden') 
 								? 'This operation requires application-level permissions or delegate access. The current user can only access their own calendar.'
 								: error.message.includes('401') || error.message.includes('Unauthorized')
 								? 'Authentication failed. Please sign out and sign in again.'
-								: 'An error occurred while executing the tool.',
+								: 'An error occurred while executing the tool. You may retry with corrected parameters.',
+							retry_suggestion: error.message.includes('not found') || error.message.includes('ambiguous')
+								? 'Call get_users_with_name_and_email to see all users, then retry with the correct email.'
+								: undefined,
 						};
 						toolResults.push({
 							role: 'tool',
@@ -669,10 +736,12 @@ export class MCPServer {
 				// Get final response from Cohere - respond naturally to the user's question using tool results
 				// Don't ask for summaries, just answer the question directly
 				const finalResponse = await this.cohereService.chat(
-					'Based on the tool results above, provide a clear and direct answer to the user\'s question. Do not summarize actions taken, only provide the requested information.',
+					'Based on the tool results above, provide a clear and direct answer to the user\'s question. ' +
+					'If a tool failed (e.g., user not found), you can use get_users_with_name_and_email to find the correct user, then retry the original tool. ' +
+					'Do not summarize actions taken, only provide the requested information.',
 					tools,
-					this.chatHistory, // Includes user message, assistant tool calls, and tool results
-					'NONE' // Don't use tools again, just respond
+					this.chatHistory,
+					undefined
 				);
 
 				// Add final assistant response to chat history

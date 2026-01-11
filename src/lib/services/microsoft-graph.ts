@@ -339,8 +339,7 @@ export class MicrosoftGraphService {
 		userEmail: string,
 		event: CreateEventRequest & { senderName?: string; senderEmail?: string; isOnlineMeeting?: boolean }
 	): Promise<MicrosoftGraphEvent> {
-		const resolvedEmail = await this.resolveUserNameToEmail(userEmail);
-		const userId = await this.getUserIdByEmail(resolvedEmail);
+		const userId = await this.getUserIdByEmail(userEmail);
 		
 		const graphEvent: MicrosoftGraphEvent = {
 			subject: event.subject,
