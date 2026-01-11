@@ -1,3 +1,5 @@
+import { PUBLIC_N8N_CHAT_WH_URL } from '$env/static/public';
+
 export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
@@ -8,36 +10,41 @@ export interface ChatResponse {
     output?: string;
     response?: string;
     message?: string;
-    error?: string;
-    // Response might return data in different formats
+    // n8n might return the data in different formats
     [key: string]: any;
 }
 
-/**
- * Send a message to the RAG agent
- */
 export async function sendMessage(sessionId: string, message: string): Promise<string> {
+    if (!PUBLIC_N8N_CHAT_WH_URL) {
+        throw new Error('PUBLIC_N8N_CHAT_WH_URL is not set');
+    }
     try {
-        const response = await fetch('/spectra-job/api', {
+        const response = await fetch(PUBLIC_N8N_CHAT_WH_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ 
                 sessionId,
-                message,
+                action: 'sendMessage',
+                chatInput: message 
             }),
         });
-        
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `Failed to send message. Status: ${response.status}`);
+            throw new Error(`Failed to send message. Your Error Code: ${response.status}`);
         }
-        
-        const data: ChatResponse = await response.json();
+        const rawData = await response.json();
         
         // Log the response to help debug
-        console.log('RAG API Response:', data);
+        console.log('API Response:', rawData);
+        
+        // Handle array responses (n8n sometimes returns arrays)
+        let data: ChatResponse;
+        if (Array.isArray(rawData) && rawData.length > 0) {
+            data = rawData[0] as ChatResponse;
+        } else {
+            data = rawData as ChatResponse;
+        }
         
         // Extract the response message, handling different possible formats
         if (data.error) {
@@ -54,7 +61,7 @@ export async function sendMessage(sessionId: string, message: string): Promise<s
         
         return responseText;
     } catch (error: any) {
-        console.error('Chat API error:', error);
+        console.error(error);
         throw error;
     }
 }
