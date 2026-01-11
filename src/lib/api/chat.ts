@@ -10,12 +10,9 @@ export interface ChatResponse {
     output?: string;
     response?: string;
     message?: string;
-    error?: string;
     // n8n might return the data in different formats
     [key: string]: any;
 }
-
-
 
 export async function sendMessage(sessionId: string, message: string): Promise<string> {
     if (!PUBLIC_N8N_CHAT_WH_URL) {
