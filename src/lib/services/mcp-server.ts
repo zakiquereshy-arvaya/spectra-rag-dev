@@ -420,22 +420,83 @@ export class MCPServer {
 						user_email = matchedUser.mail || matchedUser.userPrincipalName;
 					}
 
-					// Validate datetime format
-					const startDt = new Date(start_datetime);
-					const endDt = new Date(end_datetime);
+					// Parse and validate datetime format
+					// Handle natural language times like "9", "9:30", "9 AM", "9:30 PM"
+					// If only time is provided, assume today's date
+					let startDt: Date;
+					let endDt: Date;
+
+					// Helper to parse time strings like "9", "930", "9:30", "9 AM", "9:30 PM"
+					const parseTimeString = (timeStr: string, baseDate: Date): Date => {
+						const trimmed = timeStr.trim();
+						
+						// Full datetime format
+						if (trimmed.includes('T') || trimmed.match(/^\d{4}-\d{2}-\d{2}/)) {
+							return new Date(trimmed);
+						}
+						
+						// Handle formats like "930" (no colon) - assume 9:30
+						let normalized = trimmed;
+						if (/^\d{3,4}$/.test(normalized) && !normalized.includes(':')) {
+							// "930" -> "9:30", "930" -> "9:30"
+							if (normalized.length === 3) {
+								normalized = `${normalized[0]}:${normalized.slice(1)}`;
+							} else if (normalized.length === 4) {
+								normalized = `${normalized.slice(0, 2)}:${normalized.slice(2)}`;
+							}
+						}
+						
+						// Try parsing as "9", "9:30", "9 AM", "9:30 PM"
+						const timeMatch = normalized.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i);
+						if (timeMatch) {
+							let hours = parseInt(timeMatch[1], 10);
+							const minutes = parseInt(timeMatch[2] || '0', 10);
+							const period = timeMatch[3]?.toUpperCase();
+							
+							// Default to AM if no period specified and hours < 12, PM if >= 12
+							if (!period) {
+								if (hours >= 12) {
+									hours = hours === 12 ? 12 : hours;
+								}
+							} else {
+								if (period === 'PM' && hours !== 12) hours += 12;
+								else if (period === 'AM' && hours === 12) hours = 0;
+							}
+							
+							const result = new Date(baseDate);
+							result.setHours(hours, minutes, 0, 0);
+							return result;
+						}
+						
+						// Fallback to native Date parsing
+						return new Date(trimmed);
+					};
+
+					// Try to parse start_datetime
+					// Use today as base date if no date specified
+					const today = new Date();
+					startDt = parseTimeString(start_datetime, today);
+
+					// Try to parse end_datetime
+					// Use same date as start if only time provided
+					endDt = parseTimeString(end_datetime, startDt);
 					
 					if (isNaN(startDt.getTime()) || isNaN(endDt.getTime())) {
-						throw new Error('Invalid datetime format. Use YYYY-MM-DDTHH:MM:SS');
+						throw new Error(`Invalid datetime format. Received start: "${start_datetime}", end: "${end_datetime}". Use YYYY-MM-DDTHH:MM:SS format or time like "9:00 AM".`);
 					}
 
 					if (endDt <= startDt) {
 						throw new Error('End time must be after start time');
 					}
 
+					// Convert to ISO format for Microsoft Graph
+					const startISO = startDt.toISOString();
+					const endISO = endDt.toISOString();
+
 					const event = await this.graphService.createEventForUser(user_email, {
 						subject,
-						start: start_datetime,
-						end: end_datetime,
+						start: startISO,
+						end: endISO,
 						timeZone: 'Eastern Standard Time',
 						senderName: sender_name,
 						senderEmail: sender_email,
