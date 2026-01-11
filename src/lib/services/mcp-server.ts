@@ -10,12 +10,14 @@ import type {
 import { MicrosoftGraphService } from './microsoft-graph';
 import { MicrosoftGraphAuth } from './microsoft-graph-auth';
 import { CohereService } from './cohere';
+import { CalendarAIHelper } from './ai-calendar-helpers';
 import type { ChatMessageV2 } from 'cohere-ai/api';
 import { getChatHistory, setChatHistory } from './chat-history-store';
 
 export class MCPServer {
 	private graphService: MicrosoftGraphService;
 	private cohereService: CohereService;
+	private aiHelper: CalendarAIHelper | null;
 	private sessionId: string;
 	private chatHistory: ChatMessageV2[] = [];
 
@@ -70,7 +72,6 @@ export class MCPServer {
 			return nextDate.toISOString().split('T')[0];
 		}
 
-		// Handle "this [day]" patterns
 		const thisDayMatch = lower.match(/this\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
 		if (thisDayMatch) {
 			const dayName = thisDayMatch[1];
@@ -112,10 +113,7 @@ export class MCPServer {
 		return parsedDate.toISOString().split('T')[0];
 	}
 
-	/**
-	 * Convert UTC datetime string to local timezone string
-	 * Returns formatted time like "9:00 AM" or "2:00 PM"
-	 */
+	
 	private convertToLocalTime(utcDateTime: string): string {
 		const date = new Date(utcDateTime);
 		return date.toLocaleTimeString('en-US', {
@@ -126,10 +124,7 @@ export class MCPServer {
 		});
 	}
 
-	/**
-	 * Convert UTC datetime string to local date and time
-	 * Returns formatted string like "Mon 1/12/2026 9:00 AM"
-	 */
+	
 	private formatLocalDateTime(utcDateTime: string): string {
 		const date = new Date(utcDateTime);
 		const dateStr = date.toLocaleDateString('en-US', {
@@ -181,11 +176,15 @@ export class MCPServer {
 		authService?: MicrosoftGraphAuth,
 		accessToken?: string
 	) {
-		// Use app-only auth (client credentials) if available, otherwise fallback to delegated token
 		this.graphService = new MicrosoftGraphService(accessToken, authService);
 		this.cohereService = new CohereService(cohereApiKey);
+		try {
+			this.aiHelper = new CalendarAIHelper(cohereApiKey);
+		} catch (error) {
+			console.warn('AI helper initialization failed:', error);
+			this.aiHelper = null;
+		}
 		this.sessionId = sessionId;
-		// Load existing chat history for this session
 		this.chatHistory = getChatHistory(sessionId);
 	}
 
@@ -286,34 +285,32 @@ export class MCPServer {
 					let userEmail = args.user_email;
 					let date = args.date;
 					
-					// If user_email is a name (doesn't contain @), try to match it
 					if (!userEmail.includes('@')) {
-						const users = await this.graphService.listUsers();
-						const nameLower = userEmail.toLowerCase();
-						
-						// Try exact match first
-						let matchedUser = users.value.find(
-							(u) => u.displayName.toLowerCase() === nameLower
-						);
-						
-						// Try partial match
-						if (!matchedUser) {
-							matchedUser = users.value.find(
-								(u) => u.displayName.toLowerCase().includes(nameLower) || 
-								       nameLower.includes(u.displayName.toLowerCase())
+						if (!this.aiHelper) {
+							throw new Error(
+								'AI helper not available. Please provide user_email as an email address, ' +
+									'or ensure Cohere API is configured.'
 							);
 						}
 						
-						if (!matchedUser) {
-							const availableNames = users.value.slice(0, 5).map(u => u.displayName);
+						const users = await this.graphService.listUsers();
+						const usersList = users.value.map((u) => ({
+							name: u.displayName,
+							email: u.mail || u.userPrincipalName,
+						}));
+						
+						const targetUser = await this.aiHelper.matchUserName(userEmail, usersList);
+						
+						if (!targetUser) {
+							const availableNames = users.value.slice(0, 5).map((u) => u.displayName);
 							throw new Error(
 								`User '${userEmail}' not found or ambiguous. ` +
-								`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
-								`Example names found: ${availableNames.join(', ')}`
+									`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
+									`Example names found: ${availableNames.join(', ')}`
 							);
 						}
 						
-						userEmail = matchedUser.mail || matchedUser.userPrincipalName;
+						userEmail = targetUser.email;
 					}
 					
 					// Parse natural language date (handles "next monday", "tomorrow", etc.)
@@ -334,7 +331,6 @@ export class MCPServer {
 						endDateTime
 					);
 
-					// Extract busy times and convert UTC to local time
 					const busyTimes = events.value
 						.filter((event) => !event.isAllDay)
 						.map((event) => {
@@ -346,12 +342,11 @@ export class MCPServer {
 								end: endLocal,
 								start_datetime: this.formatLocalDateTime(event.start.dateTime),
 								end_datetime: this.formatLocalDateTime(event.end.dateTime),
-								start_utc: event.start.dateTime, // Keep UTC for reference
+								start_utc: event.start.dateTime,
 								end_utc: event.end.dateTime,
 							};
 						});
 
-					// Calculate free slots (9am-5pm business hours) using parsed date
 					const freeSlots = this.calculateFreeSlots(busyTimes, parsedDate);
 
 					const displayDate = new Date(parsedDate + 'T00:00:00');
@@ -390,34 +385,36 @@ export class MCPServer {
 						);
 					}
 
-					// If user_email is a name (doesn't contain @), try to match it
-					if (!user_email.includes('@')) {
-						const users = await this.graphService.listUsers();
-						const nameLower = user_email.toLowerCase();
-						
-						// Try exact match first
-						let matchedUser = users.value.find(
-							(u) => u.displayName.toLowerCase() === nameLower
+					if (!this.aiHelper) {
+						throw new Error(
+							'AI helper not available. Please ensure Cohere API is configured. ' +
+								'sender_email validation requires AI.'
 						);
+					}
+
+					const users = await this.graphService.listUsers();
+					const usersList = users.value.map((u) => ({
+						name: u.displayName,
+						email: u.mail || u.userPrincipalName,
+					}));
+
+					const senderUser = await this.aiHelper.validateSender(sender_name, sender_email, usersList);
+					const validatedSenderEmail = senderUser.email;
+					const validatedSenderName = senderUser.name;
+
+					if (!user_email.includes('@')) {
+						const targetUser = await this.aiHelper.matchUserName(user_email, usersList);
 						
-						// Try partial match
-						if (!matchedUser) {
-							matchedUser = users.value.find(
-								(u) => u.displayName.toLowerCase().includes(nameLower) || 
-								       nameLower.includes(u.displayName.toLowerCase())
-							);
-						}
-						
-						if (!matchedUser) {
-							const availableNames = users.value.slice(0, 5).map(u => u.displayName);
+						if (!targetUser) {
+							const availableNames = users.value.slice(0, 5).map((u) => u.displayName);
 							throw new Error(
 								`User '${user_email}' not found or ambiguous. ` +
-								`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
-								`Example names found: ${availableNames.join(', ')}`
+									`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
+									`Example names found: ${availableNames.join(', ')}`
 							);
 						}
 						
-						user_email = matchedUser.mail || matchedUser.userPrincipalName;
+						user_email = targetUser.email;
 					}
 
 					// Parse and validate datetime format
@@ -430,15 +427,12 @@ export class MCPServer {
 					const parseTimeString = (timeStr: string, baseDate: Date): Date => {
 						const trimmed = timeStr.trim();
 						
-						// Full datetime format
 						if (trimmed.includes('T') || trimmed.match(/^\d{4}-\d{2}-\d{2}/)) {
 							return new Date(trimmed);
 						}
 						
-						// Handle formats like "930" (no colon) - assume 9:30
 						let normalized = trimmed;
 						if (/^\d{3,4}$/.test(normalized) && !normalized.includes(':')) {
-							// "930" -> "9:30", "930" -> "9:30"
 							if (normalized.length === 3) {
 								normalized = `${normalized[0]}:${normalized.slice(1)}`;
 							} else if (normalized.length === 4) {
@@ -446,14 +440,12 @@ export class MCPServer {
 							}
 						}
 						
-						// Try parsing as "9", "9:30", "9 AM", "9:30 PM"
 						const timeMatch = normalized.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i);
 						if (timeMatch) {
 							let hours = parseInt(timeMatch[1], 10);
 							const minutes = parseInt(timeMatch[2] || '0', 10);
 							const period = timeMatch[3]?.toUpperCase();
 							
-							// Default to AM if no period specified and hours < 12, PM if >= 12
 							if (!period) {
 								if (hours >= 12) {
 									hours = hours === 12 ? 12 : hours;
@@ -468,17 +460,11 @@ export class MCPServer {
 							return result;
 						}
 						
-						// Fallback to native Date parsing
 						return new Date(trimmed);
 					};
 
-					// Try to parse start_datetime
-					// Use today as base date if no date specified
 					const today = new Date();
 					startDt = parseTimeString(start_datetime, today);
-
-					// Try to parse end_datetime
-					// Use same date as start if only time provided
 					endDt = parseTimeString(end_datetime, startDt);
 					
 					if (isNaN(startDt.getTime()) || isNaN(endDt.getTime())) {
@@ -489,7 +475,6 @@ export class MCPServer {
 						throw new Error('End time must be after start time');
 					}
 
-					// Convert to ISO format for Microsoft Graph
 					const startISO = startDt.toISOString();
 					const endISO = endDt.toISOString();
 
@@ -498,8 +483,8 @@ export class MCPServer {
 						start: startISO,
 						end: endISO,
 						timeZone: 'Eastern Standard Time',
-						senderName: sender_name,
-						senderEmail: sender_email,
+						senderName: validatedSenderName,
+						senderEmail: validatedSenderEmail,
 						attendees: attendees || [],
 						body: body || '',
 						isOnlineMeeting: true,
@@ -528,8 +513,8 @@ export class MCPServer {
 							teams_link: teamsLink,
 							has_teams_link: teamsLink !== null,
 							attendee_emails: attendees || [],
-							sender_name: sender_name,
-							sender_email: sender_email,
+							sender_name: validatedSenderName,
+							sender_email: validatedSenderEmail,
 						},
 					};
 				}
@@ -681,18 +666,31 @@ export class MCPServer {
 					content: userMessage,
 				});
 				// Add assistant response with tool_calls to history
-				this.chatHistory.push({
+				const assistantMessage: ChatMessageV2 = {
 					role: 'assistant',
-					content: response.text || '',
-					toolCalls: response.tool_calls?.map(tc => ({
+				};
+				
+				if (response.text) {
+					assistantMessage.content = response.text;
+				}
+				
+				if (response.tool_calls && response.tool_calls.length > 0) {
+					assistantMessage.toolCalls = response.tool_calls.map(tc => ({
 						id: tc.id,
 						type: 'function' as const,
 						function: {
 							name: tc.name,
 							arguments: JSON.stringify(tc.parameters),
 						},
-					})) || [],
-				});
+					}));
+				}
+				
+				// Ensure message has either content or toolCalls
+				if (!assistantMessage.content && !assistantMessage.toolCalls) {
+					assistantMessage.content = 'Processing request...';
+				}
+				
+				this.chatHistory.push(assistantMessage);
 
 				// Execute tools and collect results
 				const toolResults: ChatMessageV2[] = [];
@@ -702,11 +700,14 @@ export class MCPServer {
 						console.log(`Executing tool: ${toolCall.name}`, toolCall.parameters);
 						const result = await this.callTool(toolCall.name, toolCall.parameters);
 						console.log(`Tool ${toolCall.name} succeeded:`, result);
-						toolResults.push({
-							role: 'tool',
-							content: JSON.stringify(result),
-							toolCallId: toolCall.id,
-						});
+						const toolContent = JSON.stringify(result);
+						if (toolContent && toolContent.trim()) {
+							toolResults.push({
+								role: 'tool',
+								content: toolContent,
+								toolCallId: toolCall.id,
+							});
+						}
 					} catch (error: any) {
 						console.error(`Tool ${toolCall.name} failed:`, {
 							error: error.message,
@@ -719,17 +720,25 @@ export class MCPServer {
 							success: false,
 							error: error.message,
 							tool: toolCall.name,
-							suggestion: error.message.includes('403') || error.message.includes('Forbidden') 
+							suggestion: error.message.includes('not found') || error.message.includes('User') || error.message.includes('ambiguous')
+								? 'Try using get_users_with_name_and_email tool first to find the correct user, then retry with the exact email address.'
+								: error.message.includes('403') || error.message.includes('Forbidden') 
 								? 'This operation requires application-level permissions or delegate access. The current user can only access their own calendar.'
 								: error.message.includes('401') || error.message.includes('Unauthorized')
 								? 'Authentication failed. Please sign out and sign in again.'
-								: 'An error occurred while executing the tool.',
+								: 'An error occurred while executing the tool. You may retry with corrected parameters.',
+							retry_suggestion: error.message.includes('not found') || error.message.includes('ambiguous')
+								? 'Call get_users_with_name_and_email to see all users, then retry with the correct email.'
+								: undefined,
 						};
-						toolResults.push({
-							role: 'tool',
-							content: JSON.stringify(errorContent),
-							toolCallId: toolCall.id,
-						});
+						const errorToolContent = JSON.stringify(errorContent);
+						if (errorToolContent && errorToolContent.trim()) {
+							toolResults.push({
+								role: 'tool',
+								content: errorToolContent,
+								toolCallId: toolCall.id,
+							});
+						}
 					}
 				}
 
@@ -737,39 +746,67 @@ export class MCPServer {
 				this.chatHistory.push(...toolResults);
 
 				// Get final response from Cohere - respond naturally to the user's question using tool results
-				// Don't ask for summaries, just answer the question directly
+				console.log('Requesting final response from Cohere with chat history length:', this.chatHistory.length);
 				const finalResponse = await this.cohereService.chat(
-					'Based on the tool results above, provide a clear and direct answer to the user\'s question. Do not summarize actions taken, only provide the requested information.',
+					'Based on the tool results above, provide a clear and direct answer to the user\'s question. ' +
+					'If a tool failed (e.g., user not found), you can use get_users_with_name_and_email to find the correct user, then retry the original tool. ' +
+					'Do not summarize actions taken, only provide the requested information.',
 					tools,
-					this.chatHistory, // Includes user message, assistant tool calls, and tool results
-					'NONE' // Don't use tools again, just respond
+					this.chatHistory,
+					'NONE'
 				);
+
+				console.log('Final response from Cohere:', {
+					hasText: !!finalResponse.text,
+					textLength: finalResponse.text?.length || 0,
+					textPreview: finalResponse.text?.substring(0, 100),
+				});
+
+				let responseText = finalResponse.text?.trim();
+				
+				if (!responseText || responseText.length === 0) {
+					console.warn('Cohere returned empty response, generating fallback');
+					// Generate a helpful response based on tool results
+					const successfulTools = toolResults.filter(tr => {
+						try {
+							const content = typeof tr.content === 'string' ? JSON.parse(tr.content) : tr.content;
+							return content && !content.error && content.success !== false;
+						} catch {
+							return true;
+						}
+					});
+					
+					if (successfulTools.length > 0) {
+						responseText = 'I\'ve processed your request successfully. The information has been retrieved.';
+					} else {
+						responseText = 'I encountered an issue processing your request. Please try again or rephrase your question.';
+					}
+				}
 
 				// Add final assistant response to chat history
 				this.chatHistory.push({
 					role: 'assistant',
-					content: finalResponse.text,
+					content: responseText,
 				});
 
-				// Persist chat history
 				setChatHistory(this.sessionId, this.chatHistory);
 
-				return finalResponse.text;
+				return responseText;
 			} else {
-				// No tool calls, add messages to history and return
 				this.chatHistory.push({
 					role: 'user',
 					content: userMessage,
 				});
+				const responseText = response.text?.trim() || 'I received your message. How can I help you?';
+				
 				this.chatHistory.push({
 					role: 'assistant',
-					content: response.text,
+					content: responseText,
 				});
 
-				// Persist chat history
 				setChatHistory(this.sessionId, this.chatHistory);
 
-				return response.text;
+				return responseText;
 			}
 		} catch (error: any) {
 			throw new Error(`MCP processing error: ${error.message}`);
