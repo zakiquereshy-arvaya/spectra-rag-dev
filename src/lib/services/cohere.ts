@@ -116,7 +116,7 @@ export class CohereService {
 				type: 'function',
 				function: {
 					name: 'check_availability',
-					description: 'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day.',
+					description: 'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day. All times are displayed in Eastern Time (EST/EDT).',
 					parameters: {
 						type: 'object',
 						properties: {
@@ -126,7 +126,7 @@ export class CohereService {
 							},
 							date: {
 								type: 'string',
-								description: 'The date to check in YYYY-MM-DD format. Defaults to today if not provided.',
+								description: 'The date to check. Supports natural language like "next monday", "tomorrow", "this friday", or date formats like "1/12/2026" or "2026-01-12". Defaults to today if not provided.',
 							},
 						},
 						required: ['user_email'],

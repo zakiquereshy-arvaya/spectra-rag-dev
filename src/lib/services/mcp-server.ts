@@ -19,6 +19,162 @@ export class MCPServer {
 	private sessionId: string;
 	private chatHistory: ChatMessageV2[] = [];
 
+	/**
+	 * Parse natural language date strings like "next monday", "tomorrow", "1/12/2026"
+	 * Returns date in YYYY-MM-DD format
+	 */
+	private parseDate(dateString: string | undefined | null): string {
+		if (!dateString || dateString.trim() === '') {
+			const today = new Date();
+			return today.toISOString().split('T')[0];
+		}
+
+		const lower = dateString.toLowerCase().trim();
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+
+		// Handle relative dates
+		if (lower === 'today') {
+			return today.toISOString().split('T')[0];
+		}
+
+		if (lower === 'tomorrow') {
+			const tomorrow = new Date(today);
+			tomorrow.setDate(tomorrow.getDate() + 1);
+			return tomorrow.toISOString().split('T')[0];
+		}
+
+		if (lower === 'yesterday') {
+			const yesterday = new Date(today);
+			yesterday.setDate(yesterday.getDate() - 1);
+			return yesterday.toISOString().split('T')[0];
+		}
+
+		// Handle "next [day]" patterns
+		const nextDayMatch = lower.match(/next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+		if (nextDayMatch) {
+			const dayName = nextDayMatch[1];
+			const dayMap: Record<string, number> = {
+				sunday: 0,
+				monday: 1,
+				tuesday: 2,
+				wednesday: 3,
+				thursday: 4,
+				friday: 5,
+				saturday: 6,
+			};
+			const targetDay = dayMap[dayName];
+			const nextDate = new Date(today);
+			const daysUntil = (targetDay - today.getDay() + 7) % 7 || 7; // If today, get next week's
+			nextDate.setDate(today.getDate() + daysUntil);
+			return nextDate.toISOString().split('T')[0];
+		}
+
+		// Handle "this [day]" patterns
+		const thisDayMatch = lower.match(/this\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+		if (thisDayMatch) {
+			const dayName = thisDayMatch[1];
+			const dayMap: Record<string, number> = {
+				sunday: 0,
+				monday: 1,
+				tuesday: 2,
+				wednesday: 3,
+				thursday: 4,
+				friday: 5,
+				saturday: 6,
+			};
+			const targetDay = dayMap[dayName];
+			const thisDate = new Date(today);
+			const daysUntil = (targetDay - today.getDay() + 7) % 7;
+			thisDate.setDate(today.getDate() + daysUntil);
+			return thisDate.toISOString().split('T')[0];
+		}
+
+		// Try parsing as date string (MM/DD/YYYY, YYYY-MM-DD, etc.)
+		let parsedDate: Date;
+		if (lower.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+			// MM/DD/YYYY format
+			const [month, day, year] = lower.split('/').map(Number);
+			parsedDate = new Date(year, month - 1, day);
+		} else if (lower.match(/^\d{4}-\d{2}-\d{2}$/)) {
+			// YYYY-MM-DD format
+			parsedDate = new Date(lower + 'T00:00:00');
+		} else {
+			// Try native Date parsing
+			parsedDate = new Date(dateString);
+		}
+
+		if (isNaN(parsedDate.getTime())) {
+			console.warn(`Could not parse date: ${dateString}, using today`);
+			return today.toISOString().split('T')[0];
+		}
+
+		return parsedDate.toISOString().split('T')[0];
+	}
+
+	/**
+	 * Convert UTC datetime string to local timezone string
+	 * Returns formatted time like "9:00 AM" or "2:00 PM"
+	 */
+	private convertToLocalTime(utcDateTime: string): string {
+		const date = new Date(utcDateTime);
+		return date.toLocaleTimeString('en-US', {
+			hour: 'numeric',
+			minute: '2-digit',
+			hour12: true,
+			timeZone: 'America/New_York', // EST/EDT
+		});
+	}
+
+	/**
+	 * Convert UTC datetime string to local date and time
+	 * Returns formatted string like "Mon 1/12/2026 9:00 AM"
+	 */
+	private formatLocalDateTime(utcDateTime: string): string {
+		const date = new Date(utcDateTime);
+		const dateStr = date.toLocaleDateString('en-US', {
+			weekday: 'short',
+			month: 'numeric',
+			day: 'numeric',
+			year: 'numeric',
+			timeZone: 'America/New_York',
+		});
+		const timeStr = date.toLocaleTimeString('en-US', {
+			hour: 'numeric',
+			minute: '2-digit',
+			hour12: true,
+			timeZone: 'America/New_York',
+		});
+		return `${dateStr} ${timeStr}`;
+	}
+
+	/**
+	 * Parse local time string like "9:00 AM" to a Date object
+	 * @param timeStr - Time string like "9:00 AM" or "2:30 PM"
+	 * @param dateStr - Optional date string in YYYY-MM-DD format, defaults to today
+	 */
+	private parseLocalTime(timeStr: string, dateStr?: string): Date {
+		const baseDate = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+		const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+		if (!match) {
+			throw new Error(`Invalid time format: ${timeStr}`);
+		}
+		let hours = parseInt(match[1], 10);
+		const minutes = parseInt(match[2], 10);
+		const period = match[3].toUpperCase();
+
+		if (period === 'PM' && hours !== 12) {
+			hours += 12;
+		} else if (period === 'AM' && hours === 12) {
+			hours = 0;
+		}
+
+		// Create date in EST/EDT timezone
+		const date = new Date(baseDate);
+		date.setHours(hours, minutes, 0, 0);
+		return date;
+	}
+
 	constructor(
 		cohereApiKey: string,
 		sessionId: string,
@@ -50,7 +206,7 @@ export class MCPServer {
 			},
 			{
 				name: 'check_availability',
-				description: 'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day.',
+				description: 'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day. Supports natural language dates like "next monday", "tomorrow", "1/12/2026", or YYYY-MM-DD format.',
 				inputSchema: {
 					type: 'object',
 					properties: {
@@ -60,7 +216,7 @@ export class MCPServer {
 						},
 						date: {
 							type: 'string',
-							description: 'The date to check in YYYY-MM-DD format. Defaults to today if not provided.',
+							description: 'The date to check. Supports natural language like "next monday", "tomorrow", "this friday", or date formats like "1/12/2026" or "2026-01-12". Defaults to today if not provided.',
 						},
 					},
 					required: ['user_email'],
@@ -160,19 +316,16 @@ export class MCPServer {
 						userEmail = matchedUser.mail || matchedUser.userPrincipalName;
 					}
 					
-					// Default to today if no date provided
-					if (!date || date === '') {
-						const today = new Date();
-						date = today.toISOString().split('T')[0];
-					}
-
-					// Parse date and create datetime range for the full day
-					const dateObj = new Date(date + 'T00:00:00');
-					const startDateTime = `${date}T04:00:00Z`; // Start of day EST in UTC
+					// Parse natural language date (handles "next monday", "tomorrow", etc.)
+					const parsedDate = this.parseDate(date);
+					
+					// Create datetime range for the full day in EST/EDT timezone
+					// Convert local midnight to UTC for the query
+					const dateObj = new Date(parsedDate + 'T00:00:00-05:00'); // EST offset
+					const startDateTime = dateObj.toISOString();
 					const nextDay = new Date(dateObj);
 					nextDay.setDate(nextDay.getDate() + 1);
-					const nextDayStr = nextDay.toISOString().split('T')[0];
-					const endDateTime = `${nextDayStr}T05:00:00Z`; // Start of next day EST in UTC
+					const endDateTime = nextDay.toISOString();
 
 					// Get calendar view for the user
 					const events = await this.graphService.getUserCalendarView(
@@ -181,28 +334,41 @@ export class MCPServer {
 						endDateTime
 					);
 
-					// Extract busy times
+					// Extract busy times and convert UTC to local time
 					const busyTimes = events.value
 						.filter((event) => !event.isAllDay)
-						.map((event) => ({
-							subject: event.subject,
-							start: event.start.dateTime,
-							end: event.end.dateTime,
-						}));
+						.map((event) => {
+							const startLocal = this.convertToLocalTime(event.start.dateTime);
+							const endLocal = this.convertToLocalTime(event.end.dateTime);
+							return {
+								subject: event.subject,
+								start: startLocal,
+								end: endLocal,
+								start_datetime: this.formatLocalDateTime(event.start.dateTime),
+								end_datetime: this.formatLocalDateTime(event.end.dateTime),
+								start_utc: event.start.dateTime, // Keep UTC for reference
+								end_utc: event.end.dateTime,
+							};
+						});
 
-					// Calculate free slots (9am-5pm business hours)
-					const freeSlots = this.calculateFreeSlots(busyTimes, date);
+					// Calculate free slots (9am-5pm business hours) using parsed date
+					const freeSlots = this.calculateFreeSlots(busyTimes, parsedDate);
 
-					const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+					const displayDate = new Date(parsedDate + 'T00:00:00');
+					const dayOfWeek = displayDate.toLocaleDateString('en-US', { 
+						weekday: 'long',
+						timeZone: 'America/New_York',
+					});
 
 					return {
 						user_email: userEmail,
-						date,
+						date: parsedDate,
 						day_of_week: dayOfWeek,
 						busy_times: busyTimes,
 						total_events: busyTimes.length,
 						free_slots: freeSlots,
 						is_completely_free: busyTimes.length === 0,
+						note: 'All times are displayed in Eastern Time (EST/EDT)',
 					};
 				}
 
@@ -323,62 +489,74 @@ export class MCPServer {
 
 	/**
 	 * Calculate free slots based on business hours (9am-5pm)
+	 * busyTimes now has start/end as local time strings like "9:00 AM"
 	 */
-	private calculateFreeSlots(busyTimes: Array<{ start: string; end: string }>, date: string): Array<{ start: string; end: string; duration_hours: number }> {
+	private calculateFreeSlots(busyTimes: Array<{ start: string; end: string; start_utc?: string; end_utc?: string }>, date: string): Array<{ start: string; end: string; duration_hours: number }> {
 		if (busyTimes.length === 0) {
 			return [{
-				start: `${date}T09:00:00`,
-				end: `${date}T17:00:00`,
+				start: '9:00 AM',
+				end: '5:00 PM',
 				duration_hours: 8,
 			}];
 		}
 
-		const sortedBusy = [...busyTimes].sort((a, b) => 
-			new Date(a.start).getTime() - new Date(b.start).getTime()
-		);
+		// Sort by UTC times if available, otherwise by local time strings
+		const sortedBusy = [...busyTimes].sort((a, b) => {
+			if (a.start_utc && b.start_utc) {
+				return new Date(a.start_utc).getTime() - new Date(b.start_utc).getTime();
+			}
+			// Fallback: parse local time strings
+			return this.parseLocalTime(a.start).getTime() - this.parseLocalTime(b.start).getTime();
+		});
 
 		const freeSlots: Array<{ start: string; end: string; duration_hours: number }> = [];
-		const businessStart = `${date}T09:00:00`;
-		const businessEnd = `${date}T17:00:00`;
+		const businessStart = this.parseLocalTime('9:00 AM');
+		const businessEnd = this.parseLocalTime('5:00 PM');
+
+		// Helper to parse local time string like "9:00 AM" to a Date object for the given date
+		const parseTimeOnDate = (timeStr: string): Date => {
+			return this.parseLocalTime(timeStr, date);
+		};
 
 		// Check if there's free time before first meeting
-		const firstMeetingStart = sortedBusy[0].start.split('T')[1]?.split('.')[0];
-		if (firstMeetingStart && firstMeetingStart > '09:00:00') {
-			const duration = this.calculateDuration(businessStart, sortedBusy[0].start);
+		const firstMeetingStart = parseTimeOnDate(sortedBusy[0].start);
+		if (firstMeetingStart > businessStart) {
+			const duration = (firstMeetingStart.getTime() - businessStart.getTime()) / (1000 * 60 * 60);
 			if (duration > 0) {
 				freeSlots.push({
-					start: businessStart,
+					start: '9:00 AM',
 					end: sortedBusy[0].start,
-					duration_hours: duration,
+					duration_hours: Math.round(duration * 10) / 10,
 				});
 			}
 		}
 
 		// Check gaps between meetings
 		for (let i = 0; i < sortedBusy.length - 1; i++) {
-			const currentEnd = sortedBusy[i].end;
-			const nextStart = sortedBusy[i + 1].start;
-			if (new Date(currentEnd) < new Date(nextStart)) {
-				const duration = this.calculateDuration(currentEnd, nextStart);
+			const currentEnd = parseTimeOnDate(sortedBusy[i].end);
+			const nextStart = parseTimeOnDate(sortedBusy[i + 1].start);
+			
+			if (nextStart > currentEnd) {
+				const duration = (nextStart.getTime() - currentEnd.getTime()) / (1000 * 60 * 60);
 				if (duration > 0) {
 					freeSlots.push({
-						start: currentEnd,
-						end: nextStart,
-						duration_hours: duration,
+						start: sortedBusy[i].end,
+						end: sortedBusy[i + 1].start,
+						duration_hours: Math.round(duration * 10) / 10,
 					});
 				}
 			}
 		}
 
 		// Check if there's free time after last meeting
-		const lastMeetingEnd = sortedBusy[sortedBusy.length - 1].end.split('T')[1]?.split('.')[0];
-		if (lastMeetingEnd && lastMeetingEnd < '17:00:00') {
-			const duration = this.calculateDuration(sortedBusy[sortedBusy.length - 1].end, businessEnd);
+		const lastMeetingEnd = parseTimeOnDate(sortedBusy[sortedBusy.length - 1].end);
+		if (lastMeetingEnd < businessEnd) {
+			const duration = (businessEnd.getTime() - lastMeetingEnd.getTime()) / (1000 * 60 * 60);
 			if (duration > 0) {
 				freeSlots.push({
 					start: sortedBusy[sortedBusy.length - 1].end,
-					end: businessEnd,
-					duration_hours: duration,
+					end: '5:00 PM',
+					duration_hours: Math.round(duration * 10) / 10,
 				});
 			}
 		}
@@ -387,17 +565,24 @@ export class MCPServer {
 	}
 
 	/**
-	 * Calculate duration in hours between two datetime strings
+	 * Calculate duration between two local time strings (like "9:00 AM" and "10:30 AM")
+	 * Returns duration in hours
 	 */
 	private calculateDuration(start: string, end: string): number {
 		try {
-			const startClean = start.replace('Z', '').split('+')[0].split('.')[0];
-			const endClean = end.replace('Z', '').split('+')[0].split('.')[0];
-			const startDt = new Date(startClean);
-			const endDt = new Date(endClean);
-			const duration = (endDt.getTime() - startDt.getTime()) / (1000 * 60 * 60);
-			return Math.round(duration * 100) / 100;
-		} catch {
+			// If these are UTC datetime strings, parse them directly
+			if (start.includes('T') || start.includes('Z')) {
+				const startDt = new Date(start);
+				const endDt = new Date(end);
+				return (endDt.getTime() - startDt.getTime()) / (1000 * 60 * 60);
+			}
+			
+			// Otherwise, parse as local time strings
+			const startDt = this.parseLocalTime(start);
+			const endDt = this.parseLocalTime(end);
+			return (endDt.getTime() - startDt.getTime()) / (1000 * 60 * 60);
+		} catch (error) {
+			console.error('Error calculating duration:', error);
 			return 0;
 		}
 	}
