@@ -673,18 +673,31 @@ export class MCPServer {
 					content: userMessage,
 				});
 				// Add assistant response with tool_calls to history
-				this.chatHistory.push({
+				const assistantMessage: ChatMessageV2 = {
 					role: 'assistant',
-					content: response.text || '',
-					toolCalls: response.tool_calls?.map(tc => ({
+				};
+				
+				if (response.text) {
+					assistantMessage.content = response.text;
+				}
+				
+				if (response.tool_calls && response.tool_calls.length > 0) {
+					assistantMessage.toolCalls = response.tool_calls.map(tc => ({
 						id: tc.id,
 						type: 'function' as const,
 						function: {
 							name: tc.name,
 							arguments: JSON.stringify(tc.parameters),
 						},
-					})) || [],
-				});
+					}));
+				}
+				
+				// Ensure message has either content or toolCalls
+				if (!assistantMessage.content && !assistantMessage.toolCalls) {
+					assistantMessage.content = 'Processing request...';
+				}
+				
+				this.chatHistory.push(assistantMessage);
 
 				// Execute tools and collect results
 				const toolResults: ChatMessageV2[] = [];
@@ -694,11 +707,14 @@ export class MCPServer {
 						console.log(`Executing tool: ${toolCall.name}`, toolCall.parameters);
 						const result = await this.callTool(toolCall.name, toolCall.parameters);
 						console.log(`Tool ${toolCall.name} succeeded:`, result);
-						toolResults.push({
-							role: 'tool',
-							content: JSON.stringify(result),
-							toolCallId: toolCall.id,
-						});
+						const toolContent = JSON.stringify(result);
+						if (toolContent && toolContent.trim()) {
+							toolResults.push({
+								role: 'tool',
+								content: toolContent,
+								toolCallId: toolCall.id,
+							});
+						}
 					} catch (error: any) {
 						console.error(`Tool ${toolCall.name} failed:`, {
 							error: error.message,
@@ -722,11 +738,14 @@ export class MCPServer {
 								? 'Call get_users_with_name_and_email to see all users, then retry with the correct email.'
 								: undefined,
 						};
-						toolResults.push({
-							role: 'tool',
-							content: JSON.stringify(errorContent),
-							toolCallId: toolCall.id,
-						});
+						const errorToolContent = JSON.stringify(errorContent);
+						if (errorToolContent && errorToolContent.trim()) {
+							toolResults.push({
+								role: 'tool',
+								content: errorToolContent,
+								toolCallId: toolCall.id,
+							});
+						}
 					}
 				}
 
@@ -745,10 +764,12 @@ export class MCPServer {
 				);
 
 				// Add final assistant response to chat history
-				this.chatHistory.push({
-					role: 'assistant',
-					content: finalResponse.text,
-				});
+				if (finalResponse.text && finalResponse.text.trim()) {
+					this.chatHistory.push({
+						role: 'assistant',
+						content: finalResponse.text,
+					});
+				}
 
 				setChatHistory(this.sessionId, this.chatHistory);
 
@@ -758,10 +779,12 @@ export class MCPServer {
 					role: 'user',
 					content: userMessage,
 				});
-				this.chatHistory.push({
-					role: 'assistant',
-					content: response.text,
-				});
+				if (response.text && response.text.trim()) {
+					this.chatHistory.push({
+						role: 'assistant',
+						content: response.text,
+					});
+				}
 
 				setChatHistory(this.sessionId, this.chatHistory);
 
