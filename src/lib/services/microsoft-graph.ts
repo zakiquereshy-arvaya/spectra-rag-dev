@@ -333,13 +333,18 @@ export class MicrosoftGraphService {
 	}
 
 	/**
-	 * Create event for a specific user
+	 * Create event on sender's calendar and invite recipients as attendees
+	 * The sender is the organizer, recipients receive invitations
 	 */
 	async createEventForUser(
-		userEmail: string,
+		recipientEmail: string,
 		event: CreateEventRequest & { senderName?: string; senderEmail?: string; isOnlineMeeting?: boolean }
 	): Promise<MicrosoftGraphEvent> {
-		const userId = await this.getUserIdByEmail(userEmail);
+		if (!event.senderEmail) {
+			throw new Error('senderEmail is required to create an event');
+		}
+
+		const senderUserId = await this.getUserIdByEmail(event.senderEmail);
 		
 		const graphEvent: MicrosoftGraphEvent = {
 			subject: event.subject,
@@ -360,11 +365,8 @@ export class MicrosoftGraphService {
 		}
 
 		let bodyContent = '';
-		if (event.senderName && event.senderEmail) {
-			bodyContent = `<p><strong>Booked by:</strong> ${event.senderName} (${event.senderEmail})</p>`;
-		}
 		if (event.body) {
-			bodyContent += bodyContent ? `<br>${event.body}` : event.body;
+			bodyContent = event.body;
 		}
 
 		if (bodyContent) {
@@ -374,18 +376,21 @@ export class MicrosoftGraphService {
 			};
 		}
 
-		// Build attendees list - always include sender
+		// Build attendees list - include recipient and any additional attendees
+		// Sender is automatically the organizer since event is created on their calendar
 		const attendeesList: any[] = [];
-		if (event.senderEmail) {
-			attendeesList.push({
-				emailAddress: { address: event.senderEmail },
-				type: 'required',
-			});
-		}
+		
+		// Add recipient as attendee
+		attendeesList.push({
+			emailAddress: { address: recipientEmail },
+			type: 'required',
+		});
 
+		// Add any additional attendees (avoid duplicates)
 		if (event.attendees && event.attendees.length > 0) {
 			for (const email of event.attendees) {
-				if (email.toLowerCase() !== event.senderEmail?.toLowerCase()) {
+				if (email.toLowerCase() !== recipientEmail.toLowerCase() && 
+				    email.toLowerCase() !== event.senderEmail?.toLowerCase()) {
 					attendeesList.push({
 						emailAddress: { address: email },
 						type: 'required',
@@ -398,7 +403,8 @@ export class MicrosoftGraphService {
 			graphEvent.attendees = attendeesList;
 		}
 
-		return this.request<MicrosoftGraphEvent>(`/users/${userId}/events`, {
+		// Create event on sender's calendar - sender becomes the organizer
+		return this.request<MicrosoftGraphEvent>(`/users/${senderUserId}/events`, {
 			method: 'POST',
 			body: JSON.stringify(graphEvent),
 		});

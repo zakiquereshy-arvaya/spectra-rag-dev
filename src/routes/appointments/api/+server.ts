@@ -75,9 +75,22 @@ export const POST: RequestHandler = async (event) => {
 			hasCohereKey: !!cohereApiKey,
 		});
 
+		// Get logged-in user information from session
+		const loggedInUser = session.user ? {
+			name: session.user.name || session.user.email || 'Unknown User',
+			email: session.user.email || (session.user as any).userPrincipalName || ''
+		} : null;
+
+		if (!loggedInUser || !loggedInUser.email) {
+			return json(
+				{ error: 'Unable to determine logged-in user. Please ensure you are properly authenticated.' },
+				{ status: 401 }
+			);
+		}
+
 		// Create MCP server instance with app-only auth (client credentials)
 		// This allows access to all users' calendars, not just the logged-in user
-		const mcpServer = new MCPServer(cohereApiKey, sessionId, authService, accessToken || undefined);
+		const mcpServer = new MCPServer(cohereApiKey, sessionId, authService, accessToken || undefined, loggedInUser);
 
 		// Handle the request
 		const response = await mcpServer.handleRequest(mcpRequest);

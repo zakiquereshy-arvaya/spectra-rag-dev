@@ -20,6 +20,8 @@ export class MCPServer {
 	private aiHelper: CalendarAIHelper | null;
 	private sessionId: string;
 	private chatHistory: ChatMessageV2[] = [];
+	private loggedInUser: { name: string; email: string } | null = null;
+	private lastAvailabilityDate: string | null = null;
 
 	/**
 	 * Parse natural language date strings like "next monday", "tomorrow", "1/12/2026"
@@ -174,7 +176,8 @@ export class MCPServer {
 		cohereApiKey: string,
 		sessionId: string,
 		authService?: MicrosoftGraphAuth,
-		accessToken?: string
+		accessToken?: string,
+		loggedInUser?: { name: string; email: string }
 	) {
 		this.graphService = new MicrosoftGraphService(accessToken, authService);
 		this.cohereService = new CohereService(cohereApiKey);
@@ -186,6 +189,7 @@ export class MCPServer {
 		}
 		this.sessionId = sessionId;
 		this.chatHistory = getChatHistory(sessionId);
+		this.loggedInUser = loggedInUser || null;
 	}
 
 	/**
@@ -373,22 +377,25 @@ export class MCPServer {
 						subject,
 						start_datetime,
 						end_datetime,
-						sender_name,
-						sender_email,
 						attendees,
 						body,
 					} = args;
 
-					if (!sender_email || !sender_email.trim()) {
+					if (!subject || !subject.trim()) {
 						throw new Error(
-							'sender_email is REQUIRED. Please call get_users_with_name_and_email first to get the sender\'s email address.'
+							'Meeting subject is REQUIRED. Please ask the user for the meeting subject/title before booking.'
+						);
+					}
+
+					if (!this.loggedInUser) {
+						throw new Error(
+							'No logged-in user information available. Please ensure you are authenticated.'
 						);
 					}
 
 					if (!this.aiHelper) {
 						throw new Error(
-							'AI helper not available. Please ensure Cohere API is configured. ' +
-								'sender_email validation requires AI.'
+							'AI helper not available. Please ensure Cohere API is configured.'
 						);
 					}
 
@@ -398,7 +405,11 @@ export class MCPServer {
 						email: u.mail || u.userPrincipalName,
 					}));
 
-					const senderUser = await this.aiHelper.validateSender(sender_name, sender_email, usersList);
+					const senderUser = await this.aiHelper.validateSender(
+						this.loggedInUser.name,
+						this.loggedInUser.email,
+						usersList
+					);
 					const validatedSenderEmail = senderUser.email;
 					const validatedSenderName = senderUser.name;
 
@@ -463,8 +474,10 @@ export class MCPServer {
 						return new Date(trimmed);
 					};
 
-					const today = new Date();
-					startDt = parseTimeString(start_datetime, today);
+					const baseDate = this.lastAvailabilityDate 
+						? new Date(this.lastAvailabilityDate + 'T00:00:00')
+						: new Date();
+					startDt = parseTimeString(start_datetime, baseDate);
 					endDt = parseTimeString(end_datetime, startDt);
 					
 					if (isNaN(startDt.getTime()) || isNaN(endDt.getTime())) {
