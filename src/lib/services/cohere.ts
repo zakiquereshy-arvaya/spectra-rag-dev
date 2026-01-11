@@ -15,63 +15,13 @@ export class CohereService {
 	}
 
 	/**
-	 * Embed text using Cohere's embed API
-	 */
-	async embed(
-		texts: string[],
-		model: string = 'embed-english-v3.0',
-		inputType: 'search_query' | 'search_document' = 'search_query'
-	): Promise<number[][]> {
-		try {
-			const response = await this.client.embed({
-				texts: texts,
-				model: model,
-				inputType: inputType,
-			});
-
-			// Handle different response types:
-			// - EmbedFloatsResponse: embeddings is number[][]
-			// - EmbedByTypeResponse: embeddings is object with float/int8/etc properties
-			let embeddings: number[][];
-
-			if (Array.isArray(response.embeddings)) {
-				// Direct array format (EmbedFloatsResponse)
-				embeddings = response.embeddings;
-			} else if (response.embeddings && typeof response.embeddings === 'object') {
-				// Object format (EmbedByTypeResponse) - extract float embeddings
-				const embeddingsByType = response.embeddings as any;
-				if (embeddingsByType.float && Array.isArray(embeddingsByType.float)) {
-					embeddings = embeddingsByType.float;
-				} else {
-					console.error('Cohere embed response missing float embeddings:', response.embeddings);
-					throw new Error('Cohere embed API returned invalid response: missing float embeddings');
-				}
-			} else {
-				console.error('Cohere embed response has invalid embeddings structure:', response);
-				throw new Error('Cohere embed API returned invalid response: unexpected embeddings format');
-			}
-
-			if (!embeddings || embeddings.length === 0) {
-				console.error('Cohere embed response has empty embeddings:', embeddings);
-				throw new Error('Cohere embed API returned empty embeddings array');
-			}
-
-			return embeddings;
-		} catch (error: any) {
-			console.error('Cohere embed error:', error);
-			throw new Error(`Cohere embed API error: ${error.message || 'Unknown error'}`);
-		}
-	}
-
-	/**
 	 * Chat with Cohere Command model using official SDK
 	 */
 	async chat(
 		message: string,
 		tools?: ToolV2[],
 		chatHistory?: ChatMessageV2[],
-		toolChoice: 'REQUIRED' | 'NONE' | undefined = undefined,
-		documents?: Array<{ content: string; metadata?: Record<string, any> }>
+		toolChoice: 'REQUIRED' | 'NONE' | undefined = undefined
 	): Promise<{
 		text: string;
 		tool_calls?: Array<{
@@ -90,21 +40,11 @@ export class CohereService {
 				},
 			];
 
-			// Format documents for Cohere API if provided
-			const cohereDocuments = documents?.map(doc => ({
-				data: {
-					content: doc.content,
-					snippet: doc.content.substring(0, 200), // Cohere expects snippet
-					...(doc.metadata || {}),
-				},
-			}));
-
 			const response = await this.client.chat({
 				model: this.model,
 				messages: messages,
 				tools: tools && tools.length > 0 ? tools : undefined,
 				toolChoice: toolChoice,
-				documents: cohereDocuments && cohereDocuments.length > 0 ? cohereDocuments : undefined,
 			});
 
 			// Extract text from response
