@@ -15,13 +15,36 @@ export class CohereService {
 	}
 
 	/**
+	 * Embed text using Cohere's embed API
+	 */
+	async embed(
+		texts: string[],
+		model: string = 'embed-english-v3.0',
+		inputType: 'search_query' | 'search_document' = 'search_query'
+	): Promise<number[][]> {
+		try {
+			const response = await this.client.embed({
+				texts: texts,
+				model: model,
+				inputType: inputType,
+			});
+
+			return response.embeddings;
+		} catch (error: any) {
+			console.error('Cohere embed error:', error);
+			throw new Error(`Cohere embed API error: ${error.message || 'Unknown error'}`);
+		}
+	}
+
+	/**
 	 * Chat with Cohere Command model using official SDK
 	 */
 	async chat(
 		message: string,
 		tools?: ToolV2[],
 		chatHistory?: ChatMessageV2[],
-		toolChoice: 'REQUIRED' | 'NONE' | undefined = undefined
+		toolChoice: 'REQUIRED' | 'NONE' | undefined = undefined,
+		documents?: Array<{ content: string; metadata?: Record<string, any> }>
 	): Promise<{
 		text: string;
 		tool_calls?: Array<{
@@ -40,11 +63,21 @@ export class CohereService {
 				},
 			];
 
+			// Format documents for Cohere API if provided
+			const cohereDocuments = documents?.map(doc => ({
+				data: {
+					content: doc.content,
+					snippet: doc.content.substring(0, 200), // Cohere expects snippet
+					...(doc.metadata || {}),
+				},
+			}));
+
 			const response = await this.client.chat({
 				model: this.model,
 				messages: messages,
 				tools: tools && tools.length > 0 ? tools : undefined,
 				toolChoice: toolChoice,
+				documents: cohereDocuments && cohereDocuments.length > 0 ? cohereDocuments : undefined,
 			});
 
 			// Extract text from response
