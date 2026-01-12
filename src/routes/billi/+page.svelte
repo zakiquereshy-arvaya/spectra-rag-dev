@@ -5,6 +5,7 @@
 	import { sendBilliMessage } from '$lib/api/billi-chat';
 	import MessageList from '$lib/components/MessageList.svelte';
 	import type { ChatMessage } from '$lib/api/chat';
+	import { loadMessages, saveMessages } from '$lib/stores/chat-persistence';
 
 	// State management using Svelte 5 runes
 	let messages = $state<ChatMessage[]>([]);
@@ -12,6 +13,13 @@
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
 	let inputElement: HTMLTextAreaElement | undefined;
+
+	// Welcome message shown when no history exists
+	const welcomeMessage: ChatMessage = {
+		role: 'assistant',
+		content: 'Hello! I\'m Billi, your assistant for time entries and meeting bookings. How can I help you today?',
+		timestamp: new Date().toISOString(),
+	};
 
 	async function handleSend() {
 		const message = inputValue.trim();
@@ -24,6 +32,7 @@
 			timestamp: new Date().toISOString(),
 		};
 		messages = [...messages, userMessage];
+		saveMessages('billi', messages); // Persist immediately
 		inputValue = '';
 		isLoading = true;
 		error = null;
@@ -39,9 +48,12 @@
 				timestamp: new Date().toISOString(),
 			};
 			messages = [...messages, assistantMessage];
+			saveMessages('billi', messages); // Persist after response
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to send message';
 			console.error('Billi chat error:', err);
+			// Persist even on error so user sees their message was sent
+			saveMessages('billi', messages);
 		} finally {
 			isLoading = false;
 			// Refocus input after sending
@@ -57,8 +69,15 @@
 		}
 	}
 
-	// Focus input on mount
+	// Load persisted messages on mount
 	onMount(() => {
+		const persistedMessages = loadMessages('billi');
+		if (persistedMessages.length > 0) {
+			messages = persistedMessages;
+		} else {
+			messages = [welcomeMessage];
+			saveMessages('billi', messages);
+		}
 		inputElement?.focus();
 	});
 </script>
