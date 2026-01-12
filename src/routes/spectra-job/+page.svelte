@@ -1,6 +1,6 @@
 <!-- src/routes/spectra-job/+page.svelte -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { sessionStore } from '$lib/stores/session';
 	import { sendMessage, type ChatMessage } from '$lib/api/chat';
 	import MessageList from '$lib/components/MessageList.svelte';
@@ -13,6 +13,9 @@
 	let error = $state<string | null>(null);
 	let inputElement: HTMLTextAreaElement | undefined;
 
+	// AbortController for cancelling requests on unmount
+	let abortController: AbortController | null = null;
+
 	// Welcome message shown when no history exists
 	const welcomeMessage: ChatMessage = {
 		role: 'assistant',
@@ -23,6 +26,10 @@
 	async function handleSend() {
 		const message = inputValue.trim();
 		if (!message || isLoading) return;
+
+		// Cancel any pending request
+		abortController?.abort();
+		abortController = new AbortController();
 
 		// Add user message to chat
 		const userMessage: ChatMessage = {
@@ -37,8 +44,10 @@
 		error = null;
 
 		try {
-			// Send to API
-			const response = await sendMessage(sessionStore.id, message);
+			// Send to API with abort signal
+			const response = await sendMessage(sessionStore.id, message, {
+				signal: abortController.signal,
+			});
 
 			// Add assistant response to chat
 			const assistantMessage: ChatMessage = {
@@ -48,7 +57,12 @@
 			};
 			messages = [...messages, assistantMessage];
 			saveMessages('spectraJob', messages); // Persist after response
+			error = null; // Clear any previous error on success
 		} catch (err) {
+			// Don't show error if request was aborted
+			if (err instanceof Error && err.name === 'AbortError') {
+				return;
+			}
 			error = err instanceof Error ? err.message : 'Failed to send message';
 			console.error('Chat error:', err);
 			// Persist even on error so user sees their message was sent
@@ -78,6 +92,11 @@
 			saveMessages('spectraJob', messages);
 		}
 		inputElement?.focus();
+	});
+
+	// Cancel pending requests on unmount
+	onDestroy(() => {
+		abortController?.abort();
 	});
 </script>
 

@@ -1,11 +1,12 @@
 <!-- src/routes/appointments/+page.svelte -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import type { PageData } from './$types';
 	import MessageList from '$lib/components/MessageList.svelte';
 	import type { ChatMessage } from '$lib/api/chat';
 	import type { MCPRequest } from '$lib/types/mcp';
 	import { loadMessages, saveMessages } from '$lib/stores/chat-persistence';
+	import { fetchWithRetry } from '$lib/utils/retry';
 
 	let { data }: { data: PageData } = $props();
 
@@ -14,6 +15,9 @@
 	let isLoading = $state(false);
 	let sessionId = $state('');
 	let mounted = $state(false);
+
+	// AbortController for cancelling requests on unmount
+	let abortController: AbortController | null = null;
 
 	// Welcome message shown when no history exists
 	const welcomeMessage: ChatMessage = {
@@ -44,8 +48,17 @@
 		}
 	});
 
+	// Cancel pending requests on unmount
+	onDestroy(() => {
+		abortController?.abort();
+	});
+
 	async function sendMessage() {
 		if (!mounted || !inputMessage.trim() || isLoading) return;
+
+		// Cancel any pending request
+		abortController?.abort();
+		abortController = new AbortController();
 
 		const userMessage: ChatMessage = {
 			role: 'user',
@@ -76,13 +89,24 @@
 				},
 			};
 
-			const response = await fetch('/appointments/api', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
+			const response = await fetchWithRetry(
+				'/appointments/api',
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+					},
+					body: JSON.stringify(mcpRequest),
 				},
-				body: JSON.stringify(mcpRequest),
-			});
+				{
+					signal: abortController.signal,
+					timeoutMs: 120000, // 2 minute timeout for calendar operations
+					maxRetries: 2,
+					onRetry: (error, attempt, delayMs) => {
+						console.warn(`Appointments API retry attempt ${attempt} after ${delayMs}ms:`, error.message);
+					},
+				}
+			);
 
 			if (!response.ok) {
 				const error = await response.json();
@@ -104,6 +128,10 @@
 			messages = [...messages, assistantMessage];
 			saveMessages('appointments', messages); // Persist after response
 		} catch (error: any) {
+			// Don't show error if request was aborted
+			if (error instanceof Error && error.name === 'AbortError') {
+				return;
+			}
 			const errorMessage: ChatMessage = {
 				role: 'assistant',
 				content: `Error: ${error.message || 'An unexpected error occurred'}`,

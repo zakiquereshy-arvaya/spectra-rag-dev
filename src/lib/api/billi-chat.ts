@@ -1,4 +1,4 @@
-import type { ChatMessage } from './chat';
+import { fetchWithRetry } from '$lib/utils/retry';
 
 export interface BilliChatResponse {
 	output?: string;
@@ -6,39 +6,57 @@ export interface BilliChatResponse {
 	sessionId?: string;
 }
 
-export async function sendBilliMessage(sessionId: string, message: string, userName?: string): Promise<string> {
-	try {
-		const response = await fetch('/billi/api', {
+export interface SendBilliMessageOptions {
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}
+
+export async function sendBilliMessage(
+	sessionId: string,
+	message: string,
+	userName?: string,
+	options: SendBilliMessageOptions = {}
+): Promise<string> {
+	const { signal, timeoutMs = 60000 } = options;
+
+	const response = await fetchWithRetry(
+		'/billi/api',
+		{
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 			},
-			body: JSON.stringify({ 
+			body: JSON.stringify({
 				sessionId,
 				message,
-				userName
+				userName,
 			}),
-		});
+		},
+		{
+			signal,
+			timeoutMs,
+			maxRetries: 3,
+			onRetry: (error, attempt, delayMs) => {
+				console.warn(`Billi API retry attempt ${attempt} after ${delayMs}ms:`, error.message);
+			},
+		}
+	);
 
-		if (!response.ok) {
-			const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-			throw new Error(errorData.error || `Failed to send message. Status: ${response.status}`);
-		}
-
-		const data: BilliChatResponse = await response.json();
-		
-		if (data.error) {
-			throw new Error(data.error);
-		}
-		
-		if (!data.output) {
-			console.warn('Unexpected response format:', data);
-			return 'No response received from Billi';
-		}
-		
-		return data.output;
-	} catch (error: any) {
-		console.error('Billi chat error:', error);
-		throw error;
+	if (!response.ok) {
+		const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+		throw new Error(errorData.error || `Failed to send message. Status: ${response.status}`);
 	}
+
+	const data: BilliChatResponse = await response.json();
+
+	if (data.error) {
+		throw new Error(data.error);
+	}
+
+	if (!data.output) {
+		console.warn('Unexpected response format:', data);
+		return 'No response received from Billi';
+	}
+
+	return data.output;
 }

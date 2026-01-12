@@ -3,12 +3,12 @@ import type { RequestHandler } from './$types';
 import { MCPServer } from '$lib/services/mcp-server';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
-import { PUBLIC_COHERE_API_KEY } from '$env/static/public';
-import { 
-	AUTH_MICROSOFT_ENTRA_ID_ID, 
-	AUTH_MICROSOFT_ENTRA_ID_SECRET, 
-	AUTH_MICROSOFT_ENTRA_ID_ISSUER, 
-	AUTH_MICROSOFT_ENTRA_ID_TENANT_ID 
+import {
+	AUTH_MICROSOFT_ENTRA_ID_ID,
+	AUTH_MICROSOFT_ENTRA_ID_SECRET,
+	AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+	AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
+	COHERE_API_KEY
 } from '$env/static/private';
 import type { MCPRequest } from '$lib/types/mcp';
 
@@ -19,11 +19,11 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	// Get Cohere API key from environment (try public first, then private)
-	const cohereApiKey = PUBLIC_COHERE_API_KEY;
+	// Get Cohere API key from private environment variable
+	const cohereApiKey = COHERE_API_KEY;
 	if (!cohereApiKey) {
 		return json(
-			{ error: 'Cohere API key not configured. Please set PUBLIC_COHERE_API_KEY environment variable.' },
+			{ error: 'Cohere API key not configured. Please set COHERE_API_KEY environment variable.' },
 			{ status: 500 }
 		);
 	}
