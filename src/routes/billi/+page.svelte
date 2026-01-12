@@ -20,7 +20,7 @@
 	// Welcome message shown when no history exists
 	const welcomeMessage: ChatMessage = {
 		role: 'assistant',
-		content: 'Hello! I\'m Billi, your assistant for time entries and meeting bookings. How can I help you today?',
+		content: 'Hello! I\'m Billi, your assistant for time entries. How can I help you today?',
 		timestamp: new Date().toISOString(),
 	};
 
@@ -46,7 +46,7 @@
 
 		try {
 			// Send to API with abort signal
-			const response = await sendBilliMessage(sessionStore.id, message, undefined, {
+			const response = await sendBilliMessage(sessionStore.id, message, {
 				signal: abortController.signal,
 			});
 
@@ -108,7 +108,7 @@
 			Billi
 		</h1>
 		<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-			Your friendly assistant for time entries and meeting bookings
+			Your friendly assistant for time entries 
 		</p>
 	</header>
 
