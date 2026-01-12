@@ -5,6 +5,7 @@
 	import MessageList from '$lib/components/MessageList.svelte';
 	import type { ChatMessage } from '$lib/api/chat';
 	import type { MCPRequest } from '$lib/types/mcp';
+	import { loadMessages, saveMessages } from '$lib/stores/chat-persistence';
 
 	let { data }: { data: PageData } = $props();
 
@@ -14,9 +15,16 @@
 	let sessionId = $state('');
 	let mounted = $state(false);
 
+	// Welcome message shown when no history exists
+	const welcomeMessage: ChatMessage = {
+		role: 'assistant',
+		content: 'Hello! I can help you book appointments using your Microsoft Calendar. You can ask me to:\n\n• Find available time slots\n• Book an appointment\n• View your calendar events\n• List your calendars\n\nHow can I help you today?',
+		timestamp: new Date().toISOString(),
+	};
+
 	onMount(() => {
 		mounted = true;
-		
+
 		// Generate or get session ID
 		const stored = localStorage.getItem('appointment-session-id');
 		if (stored) {
@@ -26,14 +34,14 @@
 			localStorage.setItem('appointment-session-id', sessionId);
 		}
 
-		// Add welcome message
-		messages = [
-			{
-				role: 'assistant',
-				content: 'Hello! I can help you book appointments using your Microsoft Calendar. You can ask me to:\n\n• Find available time slots\n• Book an appointment\n• View your calendar events\n• List your calendars\n\nHow can I help you today?',
-				timestamp: new Date().toISOString(),
-			},
-		];
+		// Load persisted messages or show welcome message
+		const persistedMessages = loadMessages('appointments');
+		if (persistedMessages.length > 0) {
+			messages = persistedMessages;
+		} else {
+			messages = [welcomeMessage];
+			saveMessages('appointments', messages);
+		}
 	});
 
 	async function sendMessage() {
@@ -46,6 +54,7 @@
 		};
 
 		messages = [...messages, userMessage];
+		saveMessages('appointments', messages); // Persist immediately
 		const messageToSend = inputMessage.trim();
 		inputMessage = '';
 		isLoading = true;
@@ -93,6 +102,7 @@
 			};
 
 			messages = [...messages, assistantMessage];
+			saveMessages('appointments', messages); // Persist after response
 		} catch (error: any) {
 			const errorMessage: ChatMessage = {
 				role: 'assistant',
@@ -100,6 +110,7 @@
 				timestamp: new Date().toISOString(),
 			};
 			messages = [...messages, errorMessage];
+			saveMessages('appointments', messages); // Persist even on error
 		} finally {
 			isLoading = false;
 		}

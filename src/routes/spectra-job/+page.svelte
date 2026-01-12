@@ -1,9 +1,10 @@
-<!-- src/routes/+page.svelte -->
+<!-- src/routes/spectra-job/+page.svelte -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { sessionStore } from '$lib/stores/session';
 	import { sendMessage, type ChatMessage } from '$lib/api/chat';
 	import MessageList from '$lib/components/MessageList.svelte';
+	import { loadMessages, saveMessages } from '$lib/stores/chat-persistence';
 
 	// State management using Svelte 5 runes
 	let messages = $state<ChatMessage[]>([]);
@@ -11,6 +12,13 @@
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
 	let inputElement: HTMLTextAreaElement | undefined;
+
+	// Welcome message shown when no history exists
+	const welcomeMessage: ChatMessage = {
+		role: 'assistant',
+		content: 'Hello! I\'m the Taleo API Assistant. I can help you with Taleo API questions and Spectra RAG implementation. What would you like to know?',
+		timestamp: new Date().toISOString(),
+	};
 
 	async function handleSend() {
 		const message = inputValue.trim();
@@ -23,6 +31,7 @@
 			timestamp: new Date().toISOString(),
 		};
 		messages = [...messages, userMessage];
+		saveMessages('spectraJob', messages); // Persist immediately
 		inputValue = '';
 		isLoading = true;
 		error = null;
@@ -38,9 +47,12 @@
 				timestamp: new Date().toISOString(),
 			};
 			messages = [...messages, assistantMessage];
+			saveMessages('spectraJob', messages); // Persist after response
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to send message';
 			console.error('Chat error:', err);
+			// Persist even on error so user sees their message was sent
+			saveMessages('spectraJob', messages);
 		} finally {
 			isLoading = false;
 			// Refocus input after sending
@@ -56,8 +68,15 @@
 		}
 	}
 
-	// Focus input on mount
+	// Load persisted messages on mount
 	onMount(() => {
+		const persistedMessages = loadMessages('spectraJob');
+		if (persistedMessages.length > 0) {
+			messages = persistedMessages;
+		} else {
+			messages = [welcomeMessage];
+			saveMessages('spectraJob', messages);
+		}
 		inputElement?.focus();
 	});
 </script>
@@ -92,7 +111,7 @@
 				onkeydown={handleKeyDown}
 				placeholder="Type your message... (Press Enter to send, Shift+Enter for new line)"
 				disabled={isLoading}
-				class="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg 
+				class="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg
 				       bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
 				       focus:outline-none focus:ring-2 focus:ring-blue-500
 				       disabled:opacity-50 disabled:cursor-not-allowed
