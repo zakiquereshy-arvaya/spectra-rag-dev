@@ -6,7 +6,6 @@
 	import type { ChatMessage } from '$lib/api/chat';
 	import type { MCPRequest } from '$lib/types/mcp';
 	import { loadMessages, saveMessages } from '$lib/stores/chat-persistence';
-	import { fetchWithRetry } from '$lib/utils/retry';
 
 	let { data }: { data: PageData } = $props();
 
@@ -94,7 +93,7 @@
 				method: 'chat',
 				params: {
 					message: messageToSend,
-					sessionId: sessionId, // Include session ID to maintain chat history
+					sessionId: sessionId,
 				},
 			};
 
@@ -133,17 +132,21 @@
 
 				for (const line of lines) {
 					if (line.startsWith('data: ')) {
-						const data = JSON.parse(line.slice(6));
+						try {
+							const data = JSON.parse(line.slice(6));
 
-						if (data.chunk) {
-							// Append chunk to the assistant message
-							messages[assistantMessageIndex].content += data.chunk;
-							messages = [...messages]; // Trigger reactivity
-						} else if (data.error) {
-							throw new Error(data.error);
-						} else if (data.done) {
-							// Stream complete
-							break;
+							if (data.chunk) {
+								// Append chunk to the assistant message
+								messages[assistantMessageIndex].content += data.chunk;
+								messages = [...messages]; // Trigger reactivity
+							} else if (data.error) {
+								throw new Error(data.error);
+							} else if (data.done) {
+								// Stream complete
+								break;
+							}
+						} catch (parseError) {
+							console.error('Failed to parse SSE data:', line);
 						}
 					}
 				}
@@ -162,7 +165,7 @@
 			// Update the assistant message with error
 			messages[assistantMessageIndex].content = `Error: ${error.message || 'An unexpected error occurred'}`;
 			messages = [...messages];
-			saveMessages('appointments', messages); // Persist even on error
+			saveMessages('appointments', messages);
 		} finally {
 			isLoading = false;
 		}
