@@ -13,6 +13,7 @@ import { CohereService } from './cohere';
 import { CalendarAIHelper } from './ai-calendar-helpers';
 import type { ChatMessageV2 } from 'cohere-ai/api';
 import { getChatHistory, setChatHistory } from './chat-history-store';
+import { prepareChatHistory } from '$lib/utils/tokens';
 
 export class MCPServer {
 	private graphService: MicrosoftGraphService;
@@ -22,6 +23,30 @@ export class MCPServer {
 	private chatHistory: ChatMessageV2[] = [];
 	private loggedInUser: { name: string; email: string } | null = null;
 	private lastAvailabilityDate: string | null = null;
+
+	// Cached user list to avoid N+1 queries - lazily loaded and reused within request
+	private cachedUsers: Array<{ name: string; email: string }> | null = null;
+
+	/**
+	 * Get cached users list - fetches from Graph API only once per request lifecycle
+	 */
+	private async getCachedUsers(): Promise<Array<{ name: string; email: string }>> {
+		if (this.cachedUsers === null) {
+			const users = await this.graphService.listUsers();
+			this.cachedUsers = users.value.map((user) => ({
+				name: user.displayName,
+				email: user.mail || user.userPrincipalName,
+			}));
+		}
+		return this.cachedUsers;
+	}
+
+	/**
+	 * Clear user cache - call this if you need fresh data
+	 */
+	private clearUserCache(): void {
+		this.cachedUsers = null;
+	}
 
 	/**
 	 * Parse natural language date strings like "next monday", "tomorrow", "1/12/2026"
@@ -278,17 +303,15 @@ export class MCPServer {
 		try {
 			switch (name) {
 				case 'get_users_with_name_and_email': {
-					const users = await this.graphService.listUsers();
-					return users.value.map((user) => ({
-						name: user.displayName,
-						email: user.mail || user.userPrincipalName,
-					}));
+					// Use cached users to avoid repeated API calls
+					const users = await this.getCachedUsers();
+					return users;
 				}
 
 				case 'check_availability': {
 					let userEmail = args.user_email;
 					let date = args.date;
-					
+
 					if (!userEmail.includes('@')) {
 						if (!this.aiHelper) {
 							throw new Error(
@@ -296,24 +319,21 @@ export class MCPServer {
 									'or ensure Cohere API is configured.'
 							);
 						}
-						
-						const users = await this.graphService.listUsers();
-						const usersList = users.value.map((u) => ({
-							name: u.displayName,
-							email: u.mail || u.userPrincipalName,
-						}));
-						
+
+						// Use cached users to avoid repeated API calls
+						const usersList = await this.getCachedUsers();
+
 						const targetUser = await this.aiHelper.matchUserName(userEmail, usersList);
-						
+
 						if (!targetUser) {
-							const availableNames = users.value.slice(0, 5).map((u) => u.displayName);
+							const availableNames = usersList.slice(0, 5).map((u) => u.name);
 							throw new Error(
 								`User '${userEmail}' not found or ambiguous. ` +
 									`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
 									`Example names found: ${availableNames.join(', ')}`
 							);
 						}
-						
+
 						userEmail = targetUser.email;
 					}
 					
@@ -399,11 +419,8 @@ export class MCPServer {
 						);
 					}
 
-					const users = await this.graphService.listUsers();
-					const usersList = users.value.map((u) => ({
-						name: u.displayName,
-						email: u.mail || u.userPrincipalName,
-					}));
+					// Use cached users to avoid repeated API calls
+					const usersList = await this.getCachedUsers();
 
 					const senderUser = await this.aiHelper.validateSender(
 						this.loggedInUser.name,
@@ -415,16 +432,16 @@ export class MCPServer {
 
 					if (!user_email.includes('@')) {
 						const targetUser = await this.aiHelper.matchUserName(user_email, usersList);
-						
+
 						if (!targetUser) {
-							const availableNames = users.value.slice(0, 5).map((u) => u.displayName);
+							const availableNames = usersList.slice(0, 5).map((u) => u.name);
 							throw new Error(
 								`User '${user_email}' not found or ambiguous. ` +
 									`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
 									`Example names found: ${availableNames.join(', ')}`
 							);
 						}
-						
+
 						user_email = targetUser.email;
 					}
 
@@ -674,11 +691,12 @@ export class MCPServer {
 			const tools = CohereService.createCalendarTools();
 			console.log('Created tools:', tools.length);
 
-			// Call Cohere with tools - pass chat history (without current user message, SDK will add it)
+			// Call Cohere with tools - pass truncated chat history to fit within context window
+			const preparedHistory = prepareChatHistory(this.chatHistory);
 			const response = await this.cohereService.chat(
 				userMessage,
 				tools,
-				this.chatHistory, // Pass existing history (without current user message)
+				preparedHistory, // Pass truncated history (without current user message)
 				undefined // auto tool choice
 			);
 			
@@ -776,13 +794,15 @@ export class MCPServer {
 				this.chatHistory.push(...toolResults);
 
 				// Get final response from Cohere - respond naturally to the user's question using tool results
-				console.log('Requesting final response from Cohere with chat history length:', this.chatHistory.length);
+				// Use truncated history to fit within context window
+				const preparedHistoryForFinal = prepareChatHistory(this.chatHistory);
+				console.log('Requesting final response from Cohere with chat history length:', preparedHistoryForFinal.length);
 				const finalResponse = await this.cohereService.chat(
 					'Based on the tool results above, provide a clear and direct answer to the user\'s question. ' +
 					'If a tool failed (e.g., user not found), you can use get_users_with_name_and_email to find the correct user, then retry the original tool. ' +
 					'Do not summarize actions taken, only provide the requested information.',
 					tools,
-					this.chatHistory,
+					preparedHistoryForFinal,
 					'NONE'
 				);
 

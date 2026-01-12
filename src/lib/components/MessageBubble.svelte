@@ -1,20 +1,15 @@
 <script lang="ts">
-    import type { ChatMessage } from '$lib/api/chat';
+	import type { ChatMessage } from '$lib/api/chat';
+	import { formatMessageWithMarkdown } from '$lib/utils/sanitize';
 
-    let { message }: { message: ChatMessage } = $props();
+	let { message }: { message: ChatMessage } = $props();
 
-    function formatTime(date: Date): string {
-        return new Intl.DateTimeFormat('en-US', {
+	function formatTime(date: Date): string {
+		return new Intl.DateTimeFormat('en-US', {
 			hour: 'numeric',
 			minute: '2-digit',
 		}).format(date);
-    }
-
-    function formatMessage(content: string): string {
-        return content.replace(/\n/g, '<br>');
-    }
-
-    
+	}
 </script>
 
 
@@ -27,7 +22,7 @@
 		}"
 	>
 		<div class="text-sm whitespace-pre-wrap break-words">
-			{@html formatMessage(message.content)}
+			{@html formatMessageWithMarkdown(message.content)}
 		</div>
 		<div
 			class="text-xs mt-1 {
