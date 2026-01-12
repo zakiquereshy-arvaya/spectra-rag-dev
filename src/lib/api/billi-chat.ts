@@ -9,15 +9,15 @@ export interface BilliChatResponse {
 export interface SendBilliMessageOptions {
 	signal?: AbortSignal;
 	timeoutMs?: number;
+	userName?: string;
 }
 
 export async function sendBilliMessage(
 	sessionId: string,
 	message: string,
-	userName?: string,
 	options: SendBilliMessageOptions = {}
 ): Promise<string> {
-	const { signal, timeoutMs = 60000 } = options;
+	const { signal, timeoutMs = 60000, userName } = options;
 
 	const response = await fetchWithRetry(
 		'/billi/api',
