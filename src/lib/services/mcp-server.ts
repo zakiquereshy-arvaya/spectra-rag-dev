@@ -864,6 +864,138 @@ export class MCPServer {
 	}
 
 	/**
+	 * Handle MCP request with streaming support
+	 * Yields text chunks as they arrive from Cohere
+	 */
+	async *handleRequestStream(request: MCPRequest): AsyncGenerator<string> {
+		const method = request.method;
+
+		if (method === 'chat') {
+			const params = request.params as { message?: string; sessionId?: string };
+			const userMessage = params.message;
+
+			if (!userMessage) {
+				yield JSON.stringify({ error: 'Message parameter is required for chat method' });
+				return;
+			}
+
+			// Get tools for Cohere
+			const tools = CohereService.createCalendarTools();
+
+			// Call Cohere with streaming - pass truncated chat history
+			const preparedHistory = prepareChatHistory(this.chatHistory);
+			let fullText = '';
+			const toolCalls: any[] = [];
+			
+			for await (const chunk of this.cohereService.chatStream(
+				userMessage,
+				tools,
+				preparedHistory,
+				undefined
+			)) {
+				if (chunk.type === 'text' && chunk.content) {
+					fullText += chunk.content;
+					yield chunk.content; // Stream text chunks to client
+				} else if (chunk.type === 'tool_call' && chunk.toolCall) {
+					toolCalls.push(chunk.toolCall);
+				} else if (chunk.type === 'error') {
+					yield '\n\n[Error: ' + chunk.error + ']';
+					return;
+				}
+			}
+
+			// Add user message to history
+			this.chatHistory.push({
+				role: 'user',
+				content: userMessage,
+			});
+
+			// Handle tool calls if any
+			if (toolCalls.length > 0) {
+				yield '\n\n[Processing tools...]';
+				
+				// Add assistant message with tool_calls to history
+				const assistantMessage: ChatMessageV2 = {
+					role: 'assistant',
+					content: fullText || 'Processing request...',
+					toolCalls: toolCalls.map(tc => ({
+						id: tc.id,
+						type: 'function' as const,
+						function: {
+							name: tc.name,
+							arguments: JSON.stringify(tc.parameters),
+						},
+					})),
+				};
+				this.chatHistory.push(assistantMessage);
+
+				// Execute tools and collect results
+				const toolResults: ChatMessageV2[] = [];
+				for (const toolCall of toolCalls) {
+					try {
+						const result = await this.callTool(toolCall.name, toolCall.parameters);
+						const toolContent = JSON.stringify(result);
+						if (toolContent && toolContent.trim()) {
+							toolResults.push({
+								role: 'tool',
+								content: toolContent,
+								toolCallId: toolCall.id,
+							});
+						}
+					} catch (error: any) {
+						const errorContent = {
+							success: false,
+							error: error.message,
+							tool: toolCall.name,
+						};
+						toolResults.push({
+							role: 'tool',
+							content: JSON.stringify(errorContent),
+							toolCallId: toolCall.id,
+						});
+					}
+				}
+
+				// Add tool results to chat history
+				this.chatHistory.push(...toolResults);
+
+				// Get final response with streaming
+				const preparedHistoryForFinal = prepareChatHistory(this.chatHistory);
+				let finalFullText = '';
+				
+				for await (const chunk of this.cohereService.chatStream(
+					'Based on the tool results above, provide a clear and direct answer to the user\'s question.',
+					tools,
+					preparedHistoryForFinal,
+					'NONE'
+				)) {
+					if (chunk.type === 'text' && chunk.content) {
+						finalFullText += chunk.content;
+						yield chunk.content;
+					}
+				}
+
+				// Add final response to history
+				this.chatHistory.push({
+					role: 'assistant',
+					content: finalFullText,
+				});
+			} else {
+				// No tool calls - just add the response to history
+				this.chatHistory.push({
+					role: 'assistant',
+					content: fullText,
+				});
+			}
+
+			// Save updated chat history
+			setChatHistory(this.sessionId, this.chatHistory);
+		} else {
+			yield JSON.stringify({ error: `Unknown method: ${method}` });
+		}
+	}
+
+	/**
 	 * Handle MCP request
 	 */
 	async handleRequest(request: MCPRequest): Promise<MCPResponse> {

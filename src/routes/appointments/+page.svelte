@@ -72,6 +72,15 @@
 		inputMessage = '';
 		isLoading = true;
 
+		// Add a placeholder for the streaming response
+		const assistantMessageIndex = messages.length;
+		const assistantMessage: ChatMessage = {
+			role: 'assistant',
+			content: '',
+			timestamp: new Date().toISOString(),
+		};
+		messages = [...messages, assistantMessage];
+
 		try {
 			// Ensure we're in the browser
 			if (typeof window === 'undefined') {
@@ -89,55 +98,70 @@
 				},
 			};
 
-			const response = await fetchWithRetry(
-				'/appointments/api',
-				{
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify(mcpRequest),
+			const response = await fetch('/appointments/stream', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
 				},
-				{
-					signal: abortController.signal,
-					timeoutMs: 120000, // 2 minute timeout for calendar operations
-					maxRetries: 2,
-					onRetry: (error, attempt, delayMs) => {
-						console.warn(`Appointments API retry attempt ${attempt} after ${delayMs}ms:`, error.message);
-					},
-				}
-			);
+				body: JSON.stringify(mcpRequest),
+				signal: abortController.signal,
+			});
 
 			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.error?.message || 'Failed to process request');
+				throw new Error(`Failed to process request: ${response.statusText}`);
 			}
 
-			const result = await response.json();
-
-			if (result.error) {
-				throw new Error(result.error.message);
+			if (!response.body) {
+				throw new Error('Response body is null');
 			}
 
-			const assistantMessage: ChatMessage = {
-				role: 'assistant',
-				content: result.result?.content?.[0]?.text || 'No response received',
-				timestamp: new Date().toISOString(),
-			};
+			// Process the stream
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = '';
 
-			messages = [...messages, assistantMessage];
-			saveMessages('appointments', messages); // Persist after response
+			while (true) {
+				const { done, value } = await reader.read();
+
+				if (done) break;
+
+				buffer += decoder.decode(value, { stream: true });
+
+				// Process complete SSE messages
+				const lines = buffer.split('\n\n');
+				buffer = lines.pop() || '';
+
+				for (const line of lines) {
+					if (line.startsWith('data: ')) {
+						const data = JSON.parse(line.slice(6));
+
+						if (data.chunk) {
+							// Append chunk to the assistant message
+							messages[assistantMessageIndex].content += data.chunk;
+							messages = [...messages]; // Trigger reactivity
+						} else if (data.error) {
+							throw new Error(data.error);
+						} else if (data.done) {
+							// Stream complete
+							break;
+						}
+					}
+				}
+			}
+
+			// Save final state
+			saveMessages('appointments', messages);
 		} catch (error: any) {
 			// Don't show error if request was aborted
 			if (error instanceof Error && error.name === 'AbortError') {
+				// Remove the incomplete assistant message
+				messages = messages.slice(0, -1);
 				return;
 			}
-			const errorMessage: ChatMessage = {
-				role: 'assistant',
-				content: `Error: ${error.message || 'An unexpected error occurred'}`,
-				timestamp: new Date().toISOString(),
-			};
-			messages = [...messages, errorMessage];
+
+			// Update the assistant message with error
+			messages[assistantMessageIndex].content = `Error: ${error.message || 'An unexpected error occurred'}`;
+			messages = [...messages];
 			saveMessages('appointments', messages); // Persist even on error
 		} finally {
 			isLoading = false;
