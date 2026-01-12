@@ -143,6 +143,8 @@ export class CohereService {
 		try {
 			const messages = this.buildMessages(message, chatHistory);
 
+			console.log('[Cohere Stream] Starting stream with toolChoice:', toolChoice);
+
 			const stream = await this.client.chatStream({
 				model: this.model,
 				messages: messages,
@@ -157,11 +159,14 @@ export class CohereService {
 			} | null = null;
 
 			for await (const event of stream) {
+				console.log('[Cohere Stream] Event type:', event.type);
+				
 				// Handle different event types
 				if (event.type === 'content-delta') {
 					// Text content chunk
 					const delta = event.delta as any;
 					if (delta?.message?.content?.text) {
+						console.log('[Cohere Stream] Text chunk:', delta.message.content.text);
 						yield {
 							type: 'text',
 							content: delta.message.content.text,
@@ -177,6 +182,7 @@ export class CohereService {
 							name: toolCall.function?.name || '',
 							arguments: '',
 						};
+						console.log('[Cohere Stream] Tool call start:', currentToolCall.name);
 					}
 				} else if (event.type === 'tool-call-delta') {
 					// Tool call argument chunk
@@ -195,6 +201,7 @@ export class CohereService {
 						} catch {
 							parameters = {};
 						}
+						console.log('[Cohere Stream] Tool call end:', currentToolCall.name, parameters);
 						yield {
 							type: 'tool_call',
 							toolCall: {
@@ -207,11 +214,14 @@ export class CohereService {
 					}
 				} else if (event.type === 'message-end') {
 					// Stream complete
+					console.log('[Cohere Stream] Stream complete');
 					yield { type: 'done' };
 				}
 			}
+
+			console.log('[Cohere Stream] Finished iterating stream');
 		} catch (error: any) {
-			console.error('Cohere streaming error:', error);
+			console.error('[Cohere Stream] Error:', error);
 			yield {
 				type: 'error',
 				error: error.message || 'Streaming error',
