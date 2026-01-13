@@ -2,11 +2,7 @@ import type { RequestHandler } from './$types';
 import { COHERE_API_KEY, PINECONE_API_KEY } from '$env/static/private';
 import { PineconeRAGService } from '$lib/services/pinecone';
 import { CohereClientV2 } from 'cohere-ai';
-import {
-	preloadSession,
-	getChatHistory,
-	setChatHistory,
-} from '$lib/services/chat-history-store';
+import { getChatHistory, setChatHistory } from '$lib/services/chat-history-store';
 import type { ChatMessageV2 } from 'cohere-ai/api';
 
 const SYSTEM_PROMPT = `You are an expert assistant for Taleo API and Spectra's recruiting requirements. You help users understand the Taleo API documentation and Spectra's specific needs from meeting transcripts.
@@ -54,9 +50,6 @@ export const POST: RequestHandler = async (event) => {
 				headers: { 'Content-Type': 'application/json' },
 			});
 		}
-
-		// Preload session from database into cache (if not already cached)
-		await preloadSession(sessionId);
 
 		// Initialize services
 		const ragService = new PineconeRAGService(PINECONE_API_KEY, COHERE_API_KEY, 'taleo-doc');

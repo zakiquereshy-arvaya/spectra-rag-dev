@@ -10,7 +10,6 @@ import {
 	AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
 } from '$env/static/private';
 import type { MCPRequest } from '$lib/types/mcp';
-import { preloadSession } from '$lib/services/chat-history-store';
 
 export const POST: RequestHandler = async (event) => {
 	const session = await event.locals.auth();
@@ -45,9 +44,6 @@ export const POST: RequestHandler = async (event) => {
 
 		// Get session ID from request params or generate one
 		const sessionId = mcpRequest.params?.sessionId || 'default';
-
-		// Preload session from database into cache (if not already cached)
-		await preloadSession(sessionId);
 
 		// Get logged-in user information
 		const loggedInUser = session.user

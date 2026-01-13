@@ -1,10 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChatHistoryAsync, clearChatHistory } from '$lib/services/chat-history-store';
+import { getChatHistory, clearChatHistory } from '$lib/services/chat-history-store';
 
 /**
  * GET /appointments/history?sessionId=xxx
- * Fetch chat history for a session from server (loads from Supabase if needed)
+ * Fetch chat history for a session from server
  */
 export const GET: RequestHandler = async ({ url, locals }) => {
 	const session = await locals.auth();
@@ -20,8 +20,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	}
 
 	try {
-		// Use async version to load from database if not in cache
-		const history = await getChatHistoryAsync(sessionId);
+		const history = getChatHistory(sessionId);
 
 		// Convert to client format
 		const messages = history
@@ -41,7 +40,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 /**
  * DELETE /appointments/history?sessionId=xxx
- * Clear chat history for a session (removes from both cache and database)
+ * Clear chat history for a session
  */
 export const DELETE: RequestHandler = async ({ url, locals }) => {
 	const session = await locals.auth();
@@ -57,7 +56,7 @@ export const DELETE: RequestHandler = async ({ url, locals }) => {
 	}
 
 	try {
-		await clearChatHistory(sessionId);
+		clearChatHistory(sessionId);
 		return json({ success: true });
 	} catch (error) {
 		console.error('Error clearing chat history:', error);
