@@ -1,4 +1,4 @@
-<!-- src/routes/spectra-job/+page.svelte -->
+<!-- src/routes/spectra-job/+page.svelte - v2 memory fix -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import MessageList from '$lib/components/MessageList.svelte';
