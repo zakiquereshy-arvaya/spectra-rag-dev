@@ -24,7 +24,7 @@ export const POST: RequestHandler = async (event) => {
 		return new Response('Cohere API key not configured', { status: 500 });
 	}
 
-	// Get Microsoft Graph credentials
+    //get graph
 	const issuer = AUTH_MICROSOFT_ENTRA_ID_ISSUER || '';
 	const tenantId = AUTH_MICROSOFT_ENTRA_ID_TENANT_ID || (issuer ? issuer.split('/')[3] : null);
 	const clientId = AUTH_MICROSOFT_ENTRA_ID_ID;
@@ -34,10 +34,8 @@ export const POST: RequestHandler = async (event) => {
 		return new Response('Microsoft Graph authentication not configured', { status: 500 });
 	}
 
-	// Create app-only auth service
 	const authService = new MicrosoftGraphAuth(tenantId, clientId, clientSecret);
 
-	// Get delegated access token
 	const accessToken = getAccessToken(session);
 
 	try {

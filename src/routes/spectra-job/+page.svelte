@@ -2,24 +2,27 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { sessionStore } from '$lib/stores/session';
-	import { sendMessage, type ChatMessage } from '$lib/api/chat';
 	import MessageList from '$lib/components/MessageList.svelte';
-	import { loadMessages, saveMessages } from '$lib/stores/chat-persistence';
+	import type { ChatMessage } from '$lib/api/chat';
+	import { loadMessages, saveMessages, clearMessages } from '$lib/stores/chat-persistence';
 
-	// State management using Svelte 5 runes
 	let messages = $state<ChatMessage[]>([]);
 	let inputValue = $state('');
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
 	let inputElement: HTMLTextAreaElement | undefined;
 
-	// AbortController for cancelling requests on unmount
 	let abortController: AbortController | null = null;
+
+	// Batching for streaming updates to reduce re-renders
+	let pendingContent = '';
+	let updateScheduled = false;
 
 	// Welcome message shown when no history exists
 	const welcomeMessage: ChatMessage = {
 		role: 'assistant',
-		content: 'Hello! I\'m the Taleo API Assistant. I can help you with Taleo API questions and Spectra RAG implementation. What would you like to know?',
+		content:
+			"Hello! I'm the Taleo API Assistant. I can help you with:\n\n• Taleo API endpoints and documentation\n• Authentication and parameters\n• Spectra's recruiting requirements\n• Integration best practices\n\nWhat would you like to know?",
 		timestamp: new Date().toISOString(),
 	};
 
@@ -27,58 +30,149 @@
 		const message = inputValue.trim();
 		if (!message || isLoading) return;
 
-		// Cancel any pending request
 		abortController?.abort();
 		abortController = new AbortController();
 
-		// Add user message to chat
 		const userMessage: ChatMessage = {
 			role: 'user',
 			content: message,
 			timestamp: new Date().toISOString(),
 		};
 		messages = [...messages, userMessage];
-		saveMessages('spectraJob', messages); // Persist immediately
+		saveMessages('spectraJob', messages);
 		inputValue = '';
 		isLoading = true;
 		error = null;
 
+		const assistantMessageIndex = messages.length;
+		const assistantMessage: ChatMessage = {
+			role: 'assistant',
+			content: '',
+			timestamp: new Date().toISOString(),
+		};
+		messages = [...messages, assistantMessage];
+
 		try {
-			// Send to API with abort signal
-			const response = await sendMessage(sessionStore.id, message, {
+			const response = await fetch('/spectra-job/stream', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					message,
+					sessionId: sessionStore.id,
+				}),
 				signal: abortController.signal,
 			});
 
-			// Add assistant response to chat
-			const assistantMessage: ChatMessage = {
-				role: 'assistant',
-				content: response,
-				timestamp: new Date().toISOString(),
+			if (!response.ok) {
+				throw new Error(`Request failed: ${response.statusText}`);
+			}
+
+			if (!response.body) {
+				throw new Error('Response body is null');
+			}
+
+			// Process the stream
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = '';
+
+			// Batched update function using requestAnimationFrame
+			const flushPendingContent = () => {
+				if (pendingContent && messages[assistantMessageIndex]) {
+					messages[assistantMessageIndex].content += pendingContent;
+					pendingContent = '';
+					messages = [...messages];
+				}
+				updateScheduled = false;
 			};
-			messages = [...messages, assistantMessage];
-			saveMessages('spectraJob', messages); // Persist after response
-			error = null; // Clear any previous error on success
+
+			const scheduleUpdate = (chunk: string) => {
+				pendingContent += chunk;
+				if (!updateScheduled) {
+					updateScheduled = true;
+					requestAnimationFrame(flushPendingContent);
+				}
+			};
+
+			while (true) {
+				const { done, value } = await reader.read();
+
+				if (done) break;
+
+				buffer += decoder.decode(value, { stream: true });
+
+				// Process complete SSE messages
+				const lines = buffer.split('\n\n');
+				buffer = lines.pop() || '';
+
+				for (const line of lines) {
+					if (line.startsWith('data: ')) {
+						try {
+							const data = JSON.parse(line.slice(6));
+
+							if (data.chunk) {
+								scheduleUpdate(data.chunk);
+							} else if (data.error) {
+								flushPendingContent();
+								throw new Error(data.error);
+							} else if (data.done) {
+								flushPendingContent();
+								break;
+							}
+						} catch (parseError) {
+							if (parseError instanceof Error && parseError.message !== 'Unexpected end of JSON input') {
+								console.error('Failed to parse SSE data:', line);
+							}
+						}
+					}
+				}
+			}
+
+			// Final flush
+			if (pendingContent && messages[assistantMessageIndex]) {
+				messages[assistantMessageIndex].content += pendingContent;
+				pendingContent = '';
+				messages = [...messages];
+			}
+
+			// Save final state
+			saveMessages('spectraJob', messages);
+			error = null;
 		} catch (err) {
 			// Don't show error if request was aborted
 			if (err instanceof Error && err.name === 'AbortError') {
+				messages = messages.slice(0, -1);
 				return;
 			}
 			error = err instanceof Error ? err.message : 'Failed to send message';
 			console.error('Chat error:', err);
-			// Persist even on error so user sees their message was sent
+
+			// Update assistant message with error
+			if (messages[assistantMessageIndex]) {
+				messages[assistantMessageIndex].content = `Error: ${error}`;
+				messages = [...messages];
+			}
 			saveMessages('spectraJob', messages);
 		} finally {
 			isLoading = false;
-			// Refocus input after sending
 			setTimeout(() => inputElement?.focus(), 100);
 		}
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
-		// Send on Enter (but allow Shift+Enter for new line)
 		if (event.key === 'Enter' && !event.shiftKey) {
 			event.preventDefault();
 			handleSend();
+		}
+	}
+
+	function handleClearChat() {
+		if (confirm('Are you sure you want to clear the chat history?')) {
+			clearMessages('spectraJob');
+			messages = [welcomeMessage];
+			saveMessages('spectraJob', messages);
 		}
 	}
 
@@ -94,21 +188,34 @@
 		inputElement?.focus();
 	});
 
-	// Cancel pending requests on unmount
+	// Cancel pending requests and cleanup on unmount
 	onDestroy(() => {
 		abortController?.abort();
+		pendingContent = '';
+		updateScheduled = false;
 	});
 </script>
 
 <div class="flex flex-col h-screen bg-white dark:bg-gray-900">
 	<!-- Header -->
 	<header class="border-b border-gray-200 dark:border-gray-700 px-6 py-4 lg:pl-6">
-		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">
-			Taleo API Assistant
-		</h1>
-		<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-			Get help with Taleo API and Spectra RAG implementation
-		</p>
+		<div class="flex justify-between items-start max-w-4xl mx-auto">
+			<div>
+				<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Taleo API Assistant</h1>
+				<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+					Get help with Taleo API and Spectra requirements
+				</p>
+			</div>
+			<button
+				onclick={handleClearChat}
+				class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400
+				       border border-gray-300 dark:border-gray-600 rounded-lg hover:border-red-300 dark:hover:border-red-600
+				       transition-colors"
+				title="Clear chat history"
+			>
+				Clear Chat
+			</button>
+		</div>
 	</header>
 
 	<!-- Messages Area -->
@@ -128,7 +235,7 @@
 				bind:this={inputElement}
 				bind:value={inputValue}
 				onkeydown={handleKeyDown}
-				placeholder="Type your message... (Press Enter to send, Shift+Enter for new line)"
+				placeholder="Ask about Taleo API endpoints, Spectra requirements, or integration details..."
 				disabled={isLoading}
 				class="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg
 				       bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
@@ -171,5 +278,8 @@
 				{/if}
 			</button>
 		</div>
+		<p class="text-xs text-gray-500 dark:text-gray-400 mt-2 max-w-4xl mx-auto">
+			Press Enter to send, Shift+Enter for new line
+		</p>
 	</div>
 </div>
