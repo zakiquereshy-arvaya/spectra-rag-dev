@@ -5,7 +5,7 @@
 	import MessageList from '$lib/components/MessageList.svelte';
 	import type { ChatMessage } from '$lib/api/chat';
 	import type { MCPRequest } from '$lib/types/mcp';
-	import { loadMessages, saveMessages } from '$lib/stores/chat-persistence';
+	import { loadMessages, saveMessages, clearMessages } from '$lib/stores/chat-persistence';
 
 	let { data }: { data: PageData } = $props();
 
@@ -17,6 +17,10 @@
 
 	// AbortController for cancelling requests on unmount
 	let abortController: AbortController | null = null;
+
+	// Batching for streaming updates to reduce re-renders
+	let pendingContent = '';
+	let updateScheduled = false;
 
 	// Welcome message shown when no history exists
 	const welcomeMessage: ChatMessage = {
@@ -47,10 +51,21 @@
 		}
 	});
 
-	// Cancel pending requests on unmount
+	// Cancel pending requests and cleanup on unmount
 	onDestroy(() => {
 		abortController?.abort();
+		pendingContent = '';
+		updateScheduled = false;
 	});
+
+	// Clear chat history and reset
+	function handleClearChat() {
+		if (confirm('Are you sure you want to clear the chat history?')) {
+			clearMessages('appointments');
+			messages = [welcomeMessage];
+			saveMessages('appointments', messages);
+		}
+	}
 
 	async function sendMessage() {
 		if (!mounted || !inputMessage.trim() || isLoading) return;
@@ -126,6 +141,24 @@
 
 				buffer += decoder.decode(value, { stream: true });
 
+				// Batched update function using requestAnimationFrame
+				const flushPendingContent = () => {
+					if (pendingContent && messages[assistantMessageIndex]) {
+						messages[assistantMessageIndex].content += pendingContent;
+						pendingContent = '';
+						messages = [...messages]; // Trigger reactivity
+					}
+					updateScheduled = false;
+				};
+
+				const scheduleUpdate = (chunk: string) => {
+					pendingContent += chunk;
+					if (!updateScheduled) {
+						updateScheduled = true;
+						requestAnimationFrame(flushPendingContent);
+					}
+				};
+
 				// Process complete SSE messages
 				const lines = buffer.split('\n\n');
 				buffer = lines.pop() || '';
@@ -136,13 +169,15 @@
 							const data = JSON.parse(line.slice(6));
 
 							if (data.chunk) {
-								// Append chunk to the assistant message
-								messages[assistantMessageIndex].content += data.chunk;
-								messages = [...messages]; // Trigger reactivity
+								// Batch chunks for smoother rendering
+								scheduleUpdate(data.chunk);
 							} else if (data.error) {
+								// Flush any pending content before error
+								flushPendingContent();
 								throw new Error(data.error);
 							} else if (data.done) {
-								// Stream complete
+								// Flush any remaining content
+								flushPendingContent();
 								break;
 							}
 						} catch (parseError) {
@@ -150,6 +185,13 @@
 						}
 					}
 				}
+			}
+
+			// Final flush to ensure all content is rendered
+			if (pendingContent && messages[assistantMessageIndex]) {
+				messages[assistantMessageIndex].content += pendingContent;
+				pendingContent = '';
+				messages = [...messages];
 			}
 
 			// Save final state
@@ -182,13 +224,24 @@
 <div class="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
 	<!-- Header -->
 	<header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
-		<div class="max-w-4xl mx-auto">
-			<h1 class="text-2xl font-bold text-gray-900 dark:text-white">
-				Appointment Booking Assistant
-			</h1>
-			<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-				Powered by Microsoft Graph & Cohere Command
-			</p>
+		<div class="max-w-4xl mx-auto flex justify-between items-start">
+			<div>
+				<h1 class="text-2xl font-bold text-gray-900 dark:text-white">
+					Appointment Booking Assistant
+				</h1>
+				<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+					Powered by Microsoft Graph & Cohere Command
+				</p>
+			</div>
+			<button
+				onclick={handleClearChat}
+				class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400
+				       border border-gray-300 dark:border-gray-600 rounded-lg hover:border-red-300 dark:hover:border-red-600
+				       transition-colors"
+				title="Clear chat history"
+			>
+				Clear Chat
+			</button>
 		</div>
 	</header>
 
