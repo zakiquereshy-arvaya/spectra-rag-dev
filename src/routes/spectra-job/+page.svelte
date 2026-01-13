@@ -1,16 +1,22 @@
 <!-- src/routes/spectra-job/+page.svelte -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { sessionStore } from '$lib/stores/session';
 	import MessageList from '$lib/components/MessageList.svelte';
 	import type { ChatMessage } from '$lib/api/chat';
-	import { loadMessages, saveMessages, clearMessages } from '$lib/stores/chat-persistence';
+	import {
+		getSessionId,
+		fetchChatHistory,
+		clearServerHistory,
+		clearSessionId,
+	} from '$lib/stores/chat-persistence';
 
 	let messages = $state<ChatMessage[]>([]);
 	let inputValue = $state('');
 	let isLoading = $state(false);
+	let isLoadingHistory = $state(true);
 	let error = $state<string | null>(null);
 	let inputElement: HTMLTextAreaElement | undefined;
+	let sessionId = $state('');
 
 	let abortController: AbortController | null = null;
 
@@ -39,7 +45,6 @@
 			timestamp: new Date().toISOString(),
 		};
 		messages = [...messages, userMessage];
-		saveMessages('spectraJob', messages);
 		inputValue = '';
 		isLoading = true;
 		error = null;
@@ -60,7 +65,7 @@
 				},
 				body: JSON.stringify({
 					message,
-					sessionId: sessionStore.id,
+					sessionId: sessionId,
 				}),
 				signal: abortController.signal,
 			});
@@ -122,7 +127,10 @@
 								break;
 							}
 						} catch (parseError) {
-							if (parseError instanceof Error && parseError.message !== 'Unexpected end of JSON input') {
+							if (
+								parseError instanceof Error &&
+								parseError.message !== 'Unexpected end of JSON input'
+							) {
 								console.error('Failed to parse SSE data:', line);
 							}
 						}
@@ -137,8 +145,6 @@
 				messages = [...messages];
 			}
 
-			// Save final state
-			saveMessages('spectraJob', messages);
 			error = null;
 		} catch (err) {
 			// Don't show error if request was aborted
@@ -154,7 +160,6 @@
 				messages[assistantMessageIndex].content = `Error: ${error}`;
 				messages = [...messages];
 			}
-			saveMessages('spectraJob', messages);
 		} finally {
 			isLoading = false;
 			setTimeout(() => inputElement?.focus(), 100);
@@ -168,24 +173,40 @@
 		}
 	}
 
-	function handleClearChat() {
+	async function handleClearChat() {
 		if (confirm('Are you sure you want to clear the chat history?')) {
-			clearMessages('spectraJob');
+			// Clear on server
+			await clearServerHistory('spectraJob', sessionId);
+			// Clear session ID to start fresh
+			clearSessionId('spectraJob');
+			// Get new session ID
+			sessionId = getSessionId('spectraJob');
+			// Reset UI
 			messages = [welcomeMessage];
-			saveMessages('spectraJob', messages);
+			error = null;
 		}
 	}
 
-	// Load persisted messages on mount
-	onMount(() => {
-		const persistedMessages = loadMessages('spectraJob');
-		if (persistedMessages.length > 0) {
-			messages = persistedMessages;
-		} else {
+	// Load chat history from server on mount
+	onMount(async () => {
+		// Get or create session ID (stored in sessionStorage, clears when browser closes)
+		sessionId = getSessionId('spectraJob');
+
+		// Fetch chat history from server
+		try {
+			const serverHistory = await fetchChatHistory('spectraJob', sessionId);
+			if (serverHistory.length > 0) {
+				messages = serverHistory;
+			} else {
+				messages = [welcomeMessage];
+			}
+		} catch (err) {
+			console.error('Error loading history:', err);
 			messages = [welcomeMessage];
-			saveMessages('spectraJob', messages);
+		} finally {
+			isLoadingHistory = false;
+			inputElement?.focus();
 		}
-		inputElement?.focus();
 	});
 
 	// Cancel pending requests and cleanup on unmount
@@ -219,7 +240,35 @@
 	</header>
 
 	<!-- Messages Area -->
-	<MessageList {messages} />
+	<div class="flex-1 overflow-y-auto">
+		{#if isLoadingHistory}
+			<div class="flex items-center justify-center py-8">
+				<svg
+					class="animate-spin h-8 w-8 text-blue-500"
+					xmlns="http://www.w3.org/2000/svg"
+					fill="none"
+					viewBox="0 0 24 24"
+				>
+					<circle
+						class="opacity-25"
+						cx="12"
+						cy="12"
+						r="10"
+						stroke="currentColor"
+						stroke-width="4"
+					></circle>
+					<path
+						class="opacity-75"
+						fill="currentColor"
+						d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+					></path>
+				</svg>
+				<span class="ml-2 text-gray-500 dark:text-gray-400">Loading conversation...</span>
+			</div>
+		{:else}
+			<MessageList {messages} />
+		{/if}
+	</div>
 
 	<!-- Error Display -->
 	{#if error}
@@ -236,7 +285,7 @@
 				bind:value={inputValue}
 				onkeydown={handleKeyDown}
 				placeholder="Ask about Taleo API endpoints, Spectra requirements, or integration details..."
-				disabled={isLoading}
+				disabled={isLoading || isLoadingHistory}
 				class="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg
 				       bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
 				       focus:outline-none focus:ring-2 focus:ring-blue-500
@@ -246,7 +295,7 @@
 			></textarea>
 			<button
 				onclick={handleSend}
-				disabled={isLoading || !inputValue.trim()}
+				disabled={isLoading || isLoadingHistory || !inputValue.trim()}
 				class="px-6 py-3 bg-blue-500 text-white rounded-lg font-medium
 				       hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed
 				       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
