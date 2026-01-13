@@ -1,4 +1,4 @@
-<!-- src/routes/appointments/+page.svelte -->
+<!-- src/routes/appointments/+page.svelte - v4 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import type { PageData } from './$types';
@@ -20,13 +20,12 @@
 	let isLoadingHistory = $state(true);
 	let sessionId = $state('');
 	let mounted = $state(false);
+	
+	// Separate state for streaming content - displayed inline
+	let streamingContent = $state('');
 
 	// AbortController for cancelling requests on unmount
 	let abortController: AbortController | null = null;
-
-	// Batching for streaming updates to reduce re-renders
-	let pendingContent = '';
-	let updateScheduled = false;
 
 	// Welcome message shown when no history exists
 	const welcomeMessage: ChatMessage = {
@@ -58,31 +57,25 @@
 		}
 	});
 
-	// Cancel pending requests and cleanup on unmount
+	// Cancel pending requests on unmount
 	onDestroy(() => {
 		abortController?.abort();
-		pendingContent = '';
-		updateScheduled = false;
 	});
 
 	// Clear chat history and reset
 	async function handleClearChat() {
 		if (confirm('Are you sure you want to clear the chat history?')) {
-			// Clear on server
 			await clearServerHistory('appointments', sessionId);
-			// Clear session ID to start fresh
 			clearSessionId('appointments');
-			// Get new session ID
 			sessionId = getSessionId('appointments');
-			// Reset UI
 			messages = [welcomeMessage];
+			streamingContent = '';
 		}
 	}
 
 	async function sendMessage() {
 		if (!mounted || !inputMessage.trim() || isLoading) return;
 
-		// cancel pending requests
 		abortController?.abort();
 		abortController = new AbortController();
 
@@ -96,25 +89,13 @@
 		const messageToSend = inputMessage.trim();
 		inputMessage = '';
 		isLoading = true;
-
-		// Add a placeholder for the streaming response
-		const assistantMessage: ChatMessage = {
-			role: 'assistant',
-			content: '',
-			timestamp: new Date().toISOString(),
-		};
-		messages = [...messages, assistantMessage];
-
-		// Track the index of the assistant message for streaming updates
-		const assistantMessageIndex = messages.length - 1;
+		streamingContent = '';
 
 		try {
-			// Ensure we're in the browser
 			if (typeof window === 'undefined') {
 				throw new Error('This function can only be called in the browser');
 			}
 
-			// Create MCP chat request with session ID for chat history persistence
 			const mcpRequest: MCPRequest = {
 				jsonrpc: '2.0',
 				id: Date.now(),
@@ -142,29 +123,11 @@
 				throw new Error('Response body is null');
 			}
 
-			// Process the stream
+			// Process the stream - accumulate locally
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
-
-			// Batched update function using requestAnimationFrame
-			const flushPendingContent = () => {
-				if (pendingContent && messages[assistantMessageIndex]) {
-					// Direct mutation - Svelte 5 $state tracks nested changes
-					messages[assistantMessageIndex].content += pendingContent;
-					pendingContent = '';
-					// NO array spread - direct mutation is reactive in Svelte 5
-				}
-				updateScheduled = false;
-			};
-
-			const scheduleUpdate = (chunk: string) => {
-				pendingContent += chunk;
-				if (!updateScheduled) {
-					updateScheduled = true;
-					requestAnimationFrame(flushPendingContent);
-				}
-			};
+			let fullContent = '';
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -183,46 +146,46 @@
 							const data = JSON.parse(line.slice(6));
 
 							if (data.chunk) {
-								// Batch chunks for smoother rendering
-								scheduleUpdate(data.chunk);
+								fullContent += data.chunk;
+								// Update streaming display
+								streamingContent = fullContent;
 							} else if (data.error) {
-								// Flush any pending content before error
-								flushPendingContent();
 								throw new Error(data.error);
 							} else if (data.done) {
-								// Flush any remaining content
-								flushPendingContent();
 								break;
 							}
 						} catch (parseError: any) {
-							if (parseError.message) {
-								throw parseError; // Re-throw actual errors
+							if (parseError.message && parseError.message !== 'Unexpected end of JSON input') {
+								throw parseError;
 							}
-							console.error('Failed to parse SSE data:', line);
 						}
 					}
 				}
 			}
 
-			// Final flush to ensure all content is rendered
-			if (pendingContent && messages[assistantMessageIndex]) {
-				messages[assistantMessageIndex].content += pendingContent;
-				pendingContent = '';
-			}
+			// Add final message to array ONCE at the end
+			const assistantMessage: ChatMessage = {
+				role: 'assistant',
+				content: fullContent || 'No response received.',
+				timestamp: new Date().toISOString(),
+			};
+			messages = [...messages, assistantMessage];
+			streamingContent = '';
 		} catch (error: any) {
+			streamingContent = '';
+			
 			// Don't show error if request was aborted
 			if (error instanceof Error && error.name === 'AbortError') {
-				// Remove the incomplete assistant message
-				messages = messages.slice(0, -1);
 				return;
 			}
 
-			// Update the last message with error (create new array)
-			const errorContent = `Error: ${error.message || 'An unexpected error occurred'}`;
-			const lastIndex = messages.length - 1;
-			messages = messages.map((msg, i) =>
-				i === lastIndex ? { ...msg, content: errorContent } : msg
-			);
+			// Add error message
+			const errorMessage: ChatMessage = {
+				role: 'assistant',
+				content: `Error: ${error.message || 'An unexpected error occurred'}`,
+				timestamp: new Date().toISOString(),
+			};
+			messages = [...messages, errorMessage];
 		} finally {
 			isLoading = false;
 		}
@@ -238,9 +201,7 @@
 
 <div class="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
 	<!-- Header -->
-	<header
-		class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4"
-	>
+	<header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
 		<div class="max-w-4xl mx-auto flex justify-between items-start">
 			<div>
 				<h1 class="text-2xl font-bold text-gray-900 dark:text-white">
@@ -267,38 +228,30 @@
 		<div class="max-w-4xl mx-auto">
 			{#if isLoadingHistory}
 				<div class="flex items-center justify-center py-8">
-					<svg
-						class="animate-spin h-8 w-8 text-blue-500"
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24"
-					>
-						<circle
-							class="opacity-25"
-							cx="12"
-							cy="12"
-							r="10"
-							stroke="currentColor"
-							stroke-width="4"
-						></circle>
-						<path
-							class="opacity-75"
-							fill="currentColor"
-							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-						></path>
+					<svg class="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 					</svg>
 					<span class="ml-2 text-gray-500 dark:text-gray-400">Loading conversation...</span>
 				</div>
 			{:else}
 				<MessageList {messages} />
+				
+				<!-- Streaming content displayed separately -->
+				{#if streamingContent}
+					<div class="py-2">
+						<div class="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
+							{streamingContent}
+							<span class="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1"></span>
+						</div>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	</div>
 
 	<!-- Input -->
-	<div
-		class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4"
-	>
+	<div class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4">
 		<div class="max-w-4xl mx-auto">
 			<div class="flex gap-4">
 				<div class="flex-1 relative">
@@ -323,25 +276,9 @@
 					       self-end"
 				>
 					{#if isLoading}
-						<svg
-							class="animate-spin h-5 w-5"
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-						>
-							<circle
-								class="opacity-25"
-								cx="12"
-								cy="12"
-								r="10"
-								stroke="currentColor"
-								stroke-width="4"
-							></circle>
-							<path
-								class="opacity-75"
-								fill="currentColor"
-								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-							></path>
+						<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 						</svg>
 					{:else}
 						Send
