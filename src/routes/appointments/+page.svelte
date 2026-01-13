@@ -95,6 +95,9 @@
 		};
 		messages = [...messages, assistantMessage];
 		
+		// Track the index of the assistant message for streaming updates
+		const assistantMessageIndex = messages.length - 1;
+		
 		// Track accumulated content for streaming
 		let streamedContent = '';
 
