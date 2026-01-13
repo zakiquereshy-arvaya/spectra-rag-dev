@@ -5,13 +5,19 @@
 	import MessageList from '$lib/components/MessageList.svelte';
 	import type { ChatMessage } from '$lib/api/chat';
 	import type { MCPRequest } from '$lib/types/mcp';
-	import { loadMessages, saveMessages, clearMessages } from '$lib/stores/chat-persistence';
+	import {
+		getSessionId,
+		fetchChatHistory,
+		clearServerHistory,
+		clearSessionId,
+	} from '$lib/stores/chat-persistence';
 
 	let { data }: { data: PageData } = $props();
 
 	let messages = $state<ChatMessage[]>([]);
 	let inputMessage = $state('');
 	let isLoading = $state(false);
+	let isLoadingHistory = $state(true);
 	let sessionId = $state('');
 	let mounted = $state(false);
 
@@ -25,30 +31,30 @@
 	// Welcome message shown when no history exists
 	const welcomeMessage: ChatMessage = {
 		role: 'assistant',
-		content: 'Hello! I can help you book appointments using your Microsoft Calendar. You can ask me to:\n\n• Find available time slots\n• Book an appointment\n• View your calendar events\n• List your calendars\n\nHow can I help you today?',
+		content:
+			'Hello! I can help you book appointments using your Microsoft Calendar. You can ask me to:\n\n• Find available time slots\n• Book an appointment\n• View your calendar events\n• List your calendars\n\nHow can I help you today?',
 		timestamp: new Date().toISOString(),
 	};
 
-	onMount(() => {
+	onMount(async () => {
 		mounted = true;
 
-		// Generate or get session ID
-		const stored = localStorage.getItem('appointment-session-id');
-		if (stored) {
-			sessionId = stored;
-		} else {
-			// we use crypto ?!💯 soyjack
-			sessionId = crypto.randomUUID();
-			localStorage.setItem('appointment-session-id', sessionId);
-		}
+		// Get or create session ID (stored in sessionStorage, clears when browser closes)
+		sessionId = getSessionId('appointments');
 
-		// Load persisted messages or show welcome message, this is our users storage
-		const persistedMessages = loadMessages('appointments');
-		if (persistedMessages.length > 0) {
-			messages = persistedMessages;
-		} else {
+		// Fetch chat history from server
+		try {
+			const serverHistory = await fetchChatHistory('appointments', sessionId);
+			if (serverHistory.length > 0) {
+				messages = serverHistory;
+			} else {
+				messages = [welcomeMessage];
+			}
+		} catch (error) {
+			console.error('Error loading history:', error);
 			messages = [welcomeMessage];
-			saveMessages('appointments', messages);
+		} finally {
+			isLoadingHistory = false;
 		}
 	});
 
@@ -60,18 +66,23 @@
 	});
 
 	// Clear chat history and reset
-	function handleClearChat() {
+	async function handleClearChat() {
 		if (confirm('Are you sure you want to clear the chat history?')) {
-			clearMessages('appointments');
+			// Clear on server
+			await clearServerHistory('appointments', sessionId);
+			// Clear session ID to start fresh
+			clearSessionId('appointments');
+			// Get new session ID
+			sessionId = getSessionId('appointments');
+			// Reset UI
 			messages = [welcomeMessage];
-			saveMessages('appointments', messages);
 		}
 	}
 
 	async function sendMessage() {
 		if (!mounted || !inputMessage.trim() || isLoading) return;
 
-		// cancel pending requests, cant believe you have to make everything take a f'ing undefined type
+		// cancel pending requests
 		abortController?.abort();
 		abortController = new AbortController();
 
@@ -82,7 +93,6 @@
 		};
 
 		messages = [...messages, userMessage];
-		saveMessages('appointments', messages); // Persist immediately
 		const messageToSend = inputMessage.trim();
 		inputMessage = '';
 		isLoading = true;
@@ -94,12 +104,9 @@
 			timestamp: new Date().toISOString(),
 		};
 		messages = [...messages, assistantMessage];
-		
+
 		// Track the index of the assistant message for streaming updates
 		const assistantMessageIndex = messages.length - 1;
-		
-		// Track accumulated content for streaming
-		let streamedContent = '';
 
 		try {
 			// Ensure we're in the browser
@@ -135,7 +142,7 @@
 				throw new Error('Response body is null');
 			}
 
-			// Process the stream of piss
+			// Process the stream
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
@@ -202,9 +209,6 @@
 				pendingContent = '';
 				messages = [...messages];
 			}
-
-			// Save final state
-			saveMessages('appointments', messages);
 		} catch (error: any) {
 			// Don't show error if request was aborted
 			if (error instanceof Error && error.name === 'AbortError') {
@@ -216,12 +220,9 @@
 			// Update the last message with error (create new array)
 			const errorContent = `Error: ${error.message || 'An unexpected error occurred'}`;
 			const lastIndex = messages.length - 1;
-			messages = messages.map((msg, i) => 
-				i === lastIndex 
-					? { ...msg, content: errorContent }
-					: msg
+			messages = messages.map((msg, i) =>
+				i === lastIndex ? { ...msg, content: errorContent } : msg
 			);
-			saveMessages('appointments', messages);
 		} finally {
 			isLoading = false;
 		}
@@ -237,7 +238,9 @@
 
 <div class="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
 	<!-- Header -->
-	<header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+	<header
+		class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4"
+	>
 		<div class="max-w-4xl mx-auto flex justify-between items-start">
 			<div>
 				<h1 class="text-2xl font-bold text-gray-900 dark:text-white">
@@ -262,12 +265,40 @@
 	<!-- Messages -->
 	<div class="flex-1 overflow-y-auto px-6 py-4">
 		<div class="max-w-4xl mx-auto">
-			<MessageList messages={messages} />
+			{#if isLoadingHistory}
+				<div class="flex items-center justify-center py-8">
+					<svg
+						class="animate-spin h-8 w-8 text-blue-500"
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+					>
+						<circle
+							class="opacity-25"
+							cx="12"
+							cy="12"
+							r="10"
+							stroke="currentColor"
+							stroke-width="4"
+						></circle>
+						<path
+							class="opacity-75"
+							fill="currentColor"
+							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+						></path>
+					</svg>
+					<span class="ml-2 text-gray-500 dark:text-gray-400">Loading conversation...</span>
+				</div>
+			{:else}
+				<MessageList {messages} />
+			{/if}
 		</div>
 	</div>
 
 	<!-- Input -->
-	<div class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4">
+	<div
+		class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4"
+	>
 		<div class="max-w-4xl mx-auto">
 			<div class="flex gap-4">
 				<div class="flex-1 relative">
@@ -280,21 +311,37 @@
 						       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
 						       resize-none"
 						rows="3"
-						disabled={isLoading}
+						disabled={isLoading || isLoadingHistory}
 					></textarea>
 				</div>
 				<button
 					onclick={sendMessage}
-					disabled={isLoading || !inputMessage.trim()}
+					disabled={isLoading || isLoadingHistory || !inputMessage.trim()}
 					class="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold
 					       hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
 					       disabled:opacity-50 disabled:cursor-not-allowed transition-colors
 					       self-end"
 				>
 					{#if isLoading}
-						<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+						<svg
+							class="animate-spin h-5 w-5"
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+						>
+							<circle
+								class="opacity-25"
+								cx="12"
+								cy="12"
+								r="10"
+								stroke="currentColor"
+								stroke-width="4"
+							></circle>
+							<path
+								class="opacity-75"
+								fill="currentColor"
+								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+							></path>
 						</svg>
 					{:else}
 						Send
