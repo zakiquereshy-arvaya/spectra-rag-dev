@@ -1,4 +1,4 @@
-<!-- src/routes/spectra-job/+page.svelte - v3 -->
+<!-- src/routes/spectra-job/+page.svelte - v4 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import MessageList from '$lib/components/MessageList.svelte';
@@ -17,12 +17,11 @@
 	let error = $state<string | null>(null);
 	let inputElement: HTMLTextAreaElement | undefined;
 	let sessionId = $state('');
+	
+	// Separate state for streaming content - displayed inline
+	let streamingContent = $state('');
 
 	let abortController: AbortController | null = null;
-
-	// Batching for streaming updates to reduce re-renders
-	let pendingContent = '';
-	let updateScheduled = false;
 
 	// Welcome message shown when no history exists
 	const welcomeMessage: ChatMessage = {
@@ -48,14 +47,7 @@
 		inputValue = '';
 		isLoading = true;
 		error = null;
-
-		const assistantMessageIndex = messages.length;
-		const assistantMessage: ChatMessage = {
-			role: 'assistant',
-			content: '',
-			timestamp: new Date().toISOString(),
-		};
-		messages = [...messages, assistantMessage];
+		streamingContent = '';
 
 		try {
 			const response = await fetch('/spectra-job/stream', {
@@ -78,29 +70,11 @@
 				throw new Error('Response body is null');
 			}
 
-			// Process the stream
+			// Process the stream - accumulate locally
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
-
-			// Batched update function using requestAnimationFrame
-			const flushPendingContent = () => {
-				if (pendingContent && messages[assistantMessageIndex]) {
-					// Direct mutation - Svelte 5 $state tracks nested changes
-					messages[assistantMessageIndex].content += pendingContent;
-					pendingContent = '';
-					// NO array spread - direct mutation is reactive in Svelte 5
-				}
-				updateScheduled = false;
-			};
-
-			const scheduleUpdate = (chunk: string) => {
-				pendingContent += chunk;
-				if (!updateScheduled) {
-					updateScheduled = true;
-					requestAnimationFrame(flushPendingContent);
-				}
-			};
+			let fullContent = '';
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -119,47 +93,50 @@
 							const data = JSON.parse(line.slice(6));
 
 							if (data.chunk) {
-								scheduleUpdate(data.chunk);
+								fullContent += data.chunk;
+								// Update streaming display (throttled)
+								streamingContent = fullContent;
 							} else if (data.error) {
-								flushPendingContent();
 								throw new Error(data.error);
 							} else if (data.done) {
-								flushPendingContent();
 								break;
 							}
 						} catch (parseError) {
-							if (
-								parseError instanceof Error &&
-								parseError.message !== 'Unexpected end of JSON input'
-							) {
-								console.error('Failed to parse SSE data:', line);
+							if (parseError instanceof Error && parseError.message !== 'Unexpected end of JSON input') {
+								throw parseError;
 							}
 						}
 					}
 				}
 			}
 
-			// Final flush
-			if (pendingContent && messages[assistantMessageIndex]) {
-				messages[assistantMessageIndex].content += pendingContent;
-				pendingContent = '';
-			}
-
+			// Add final message to array ONCE at the end
+			const assistantMessage: ChatMessage = {
+				role: 'assistant',
+				content: fullContent || 'No response received.',
+				timestamp: new Date().toISOString(),
+			};
+			messages = [...messages, assistantMessage];
+			streamingContent = '';
 			error = null;
 		} catch (err) {
+			streamingContent = '';
+			
 			// Don't show error if request was aborted
 			if (err instanceof Error && err.name === 'AbortError') {
-				messages = messages.slice(0, -1);
 				return;
 			}
+			
 			error = err instanceof Error ? err.message : 'Failed to send message';
 			console.error('Chat error:', err);
 
-			// Update assistant message with error
-			if (messages[assistantMessageIndex]) {
-				messages[assistantMessageIndex].content = `Error: ${error}`;
-				messages = [...messages];
-			}
+			// Add error message
+			const errorMessage: ChatMessage = {
+				role: 'assistant',
+				content: `Error: ${error}`,
+				timestamp: new Date().toISOString(),
+			};
+			messages = [...messages, errorMessage];
 		} finally {
 			isLoading = false;
 			setTimeout(() => inputElement?.focus(), 100);
@@ -175,24 +152,18 @@
 
 	async function handleClearChat() {
 		if (confirm('Are you sure you want to clear the chat history?')) {
-			// Clear on server
 			await clearServerHistory('spectraJob', sessionId);
-			// Clear session ID to start fresh
 			clearSessionId('spectraJob');
-			// Get new session ID
 			sessionId = getSessionId('spectraJob');
-			// Reset UI
 			messages = [welcomeMessage];
 			error = null;
+			streamingContent = '';
 		}
 	}
 
-	// Load chat history from server on mount
 	onMount(async () => {
-		// Get or create session ID (stored in sessionStorage, clears when browser closes)
 		sessionId = getSessionId('spectraJob');
 
-		// Fetch chat history from server
 		try {
 			const serverHistory = await fetchChatHistory('spectraJob', sessionId);
 			if (serverHistory.length > 0) {
@@ -209,11 +180,8 @@
 		}
 	});
 
-	// Cancel pending requests and cleanup on unmount
 	onDestroy(() => {
 		abortController?.abort();
-		pendingContent = '';
-		updateScheduled = false;
 	});
 </script>
 
@@ -249,24 +217,25 @@
 					fill="none"
 					viewBox="0 0 24 24"
 				>
-					<circle
-						class="opacity-25"
-						cx="12"
-						cy="12"
-						r="10"
-						stroke="currentColor"
-						stroke-width="4"
-					></circle>
-					<path
-						class="opacity-75"
-						fill="currentColor"
-						d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-					></path>
+					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 				</svg>
 				<span class="ml-2 text-gray-500 dark:text-gray-400">Loading conversation...</span>
 			</div>
 		{:else}
 			<MessageList {messages} />
+			
+			<!-- Streaming content displayed separately -->
+			{#if streamingContent}
+				<div class="px-4 py-2">
+					<div class="max-w-3xl ml-auto">
+						<div class="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
+							{streamingContent}
+							<span class="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1"></span>
+						</div>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</div>
 
@@ -302,25 +271,9 @@
 				       transition-colors"
 			>
 				{#if isLoading}
-					<svg
-						class="animate-spin h-5 w-5"
-						xmlns="http://www.w3.org/2000/svg"
-						fill="none"
-						viewBox="0 0 24 24"
-					>
-						<circle
-							class="opacity-25"
-							cx="12"
-							cy="12"
-							r="10"
-							stroke="currentColor"
-							stroke-width="4"
-						></circle>
-						<path
-							class="opacity-75"
-							fill="currentColor"
-							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-						></path>
+					<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 					</svg>
 				{:else}
 					Send
