@@ -9,7 +9,6 @@
 </script>
 
 <div class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-	<!-- Hero Section -->
 	<section class="px-6 py-20 lg:py-32">
 		<div class="max-w-4xl mx-auto text-center">
 			<!-- Company Logo -->
