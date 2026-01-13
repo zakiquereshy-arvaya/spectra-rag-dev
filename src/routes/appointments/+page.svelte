@@ -37,11 +37,12 @@
 		if (stored) {
 			sessionId = stored;
 		} else {
+			// we use crypto ?!💯 soyjack
 			sessionId = crypto.randomUUID();
 			localStorage.setItem('appointment-session-id', sessionId);
 		}
 
-		// Load persisted messages or show welcome message
+		// Load persisted messages or show welcome message, this is our users storage
 		const persistedMessages = loadMessages('appointments');
 		if (persistedMessages.length > 0) {
 			messages = persistedMessages;
@@ -70,7 +71,7 @@
 	async function sendMessage() {
 		if (!mounted || !inputMessage.trim() || isLoading) return;
 
-		// Cancel any pending request
+		// cancel pending requests, cant believe you have to make everything take a f'ing undefined type
 		abortController?.abort();
 		abortController = new AbortController();
 
@@ -129,7 +130,7 @@
 				throw new Error('Response body is null');
 			}
 
-			// Process the stream
+			// Process the stream of piss
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
