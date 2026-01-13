@@ -88,13 +88,15 @@
 		isLoading = true;
 
 		// Add a placeholder for the streaming response
-		const assistantMessageIndex = messages.length;
 		const assistantMessage: ChatMessage = {
 			role: 'assistant',
 			content: '',
 			timestamp: new Date().toISOString(),
 		};
 		messages = [...messages, assistantMessage];
+		
+		// Track accumulated content for streaming
+		let streamedContent = '';
 
 		try {
 			// Ensure we're in the browser
@@ -181,7 +183,10 @@
 								flushPendingContent();
 								break;
 							}
-						} catch (parseError) {
+						} catch (parseError: any) {
+							if (parseError.message) {
+								throw parseError; // Re-throw actual errors
+							}
 							console.error('Failed to parse SSE data:', line);
 						}
 					}
@@ -205,9 +210,14 @@
 				return;
 			}
 
-			// Update the assistant message with error
-			messages[assistantMessageIndex].content = `Error: ${error.message || 'An unexpected error occurred'}`;
-			messages = [...messages];
+			// Update the last message with error (create new array)
+			const errorContent = `Error: ${error.message || 'An unexpected error occurred'}`;
+			const lastIndex = messages.length - 1;
+			messages = messages.map((msg, i) => 
+				i === lastIndex 
+					? { ...msg, content: errorContent }
+					: msg
+			);
 			saveMessages('appointments', messages);
 		} finally {
 			isLoading = false;

@@ -33,6 +33,7 @@
 		abortController = new AbortController();
 
 		// Add user message to chat
+		//TODO: Add user name and email to the message
 		const userMessage: ChatMessage = {
 			role: 'user',
 			content: message,
