@@ -2,6 +2,12 @@ import type { RequestHandler } from './$types';
 import { COHERE_API_KEY, PINECONE_API_KEY } from '$env/static/private';
 import { PineconeRAGService } from '$lib/services/pinecone';
 import { CohereClientV2 } from 'cohere-ai';
+import {
+	preloadSession,
+	getChatHistory,
+	setChatHistory,
+} from '$lib/services/chat-history-store';
+import type { ChatMessageV2 } from 'cohere-ai/api';
 
 const SYSTEM_PROMPT = `You are an expert assistant for Taleo API and Spectra's recruiting requirements. You help users understand the Taleo API documentation and Spectra's specific needs from meeting transcripts.
 
@@ -40,7 +46,7 @@ export const POST: RequestHandler = async (event) => {
 
 	try {
 		const body = await event.request.json();
-		const { message, sessionId } = body;
+		const { message, sessionId = 'default' } = body;
 
 		if (!message || typeof message !== 'string') {
 			return new Response(JSON.stringify({ error: 'Message is required' }), {
@@ -48,6 +54,9 @@ export const POST: RequestHandler = async (event) => {
 				headers: { 'Content-Type': 'application/json' },
 			});
 		}
+
+		// Preload session from database into cache (if not already cached)
+		await preloadSession(sessionId);
 
 		// Initialize services
 		const ragService = new PineconeRAGService(PINECONE_API_KEY, COHERE_API_KEY, 'taleo-doc');
@@ -59,12 +68,17 @@ export const POST: RequestHandler = async (event) => {
 		const formattedContext = PineconeRAGService.formatContextForPrompt(context);
 		console.log('Retrieved', context.documents.length, 'documents from Pinecone');
 
-		// Build messages for Cohere
-		const messages = [
+		// Get existing chat history
+		const chatHistory = getChatHistory(sessionId);
+
+		// Build messages for Cohere with chat history
+		const messages: ChatMessageV2[] = [
 			{
 				role: 'system' as const,
 				content: SYSTEM_PROMPT,
 			},
+			// Include recent chat history (last 10 exchanges max)
+			...chatHistory.slice(-20).filter((msg) => msg.role === 'user' || msg.role === 'assistant'),
 			{
 				role: 'user' as const,
 				content: `**Context from Knowledge Base:**
@@ -76,6 +90,13 @@ ${message}
 Please answer the question based on the context provided. Remember: do not mention sources, tool calls, or how you found the information - just answer naturally.`,
 			},
 		];
+
+		// Add user message to history
+		const userMsg: ChatMessageV2 = { role: 'user', content: message };
+		chatHistory.push(userMsg);
+
+		// Track response for history
+		let fullResponse = '';
 
 		// Create streaming response
 		const stream = new ReadableStream({
@@ -92,11 +113,17 @@ Please answer the question based on the context provided. Remember: do not menti
 						if (event.type === 'content-delta') {
 							const delta = event.delta as { message?: { content?: { text?: string } } };
 							if (delta?.message?.content?.text) {
+								fullResponse += delta.message.content.text;
 								controller.enqueue(
 									encoder.encode(`data: ${JSON.stringify({ chunk: delta.message.content.text })}\n\n`)
 								);
 							}
 						} else if (event.type === 'message-end') {
+							// Save assistant response to history
+							if (fullResponse) {
+								chatHistory.push({ role: 'assistant', content: fullResponse });
+								setChatHistory(sessionId, chatHistory);
+							}
 							controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
 						}
 					}

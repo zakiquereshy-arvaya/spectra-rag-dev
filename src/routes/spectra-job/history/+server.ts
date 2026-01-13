@@ -1,10 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getChatHistory, clearChatHistory } from '$lib/services/chat-history-store';
+import { getChatHistoryAsync, clearChatHistory } from '$lib/services/chat-history-store';
 
 /**
  * GET /spectra-job/history?sessionId=xxx
- * Fetch chat history for a session from server
+ * Fetch chat history for a session from server (loads from Supabase if needed)
  */
 export const GET: RequestHandler = async ({ url, locals }) => {
 	const session = await locals.auth();
@@ -20,7 +20,8 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	}
 
 	try {
-		const history = getChatHistory(sessionId);
+		// Use async version to load from database if not in cache
+		const history = await getChatHistoryAsync(sessionId);
 
 		// Convert to client format
 		const messages = history
@@ -40,7 +41,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 /**
  * DELETE /spectra-job/history?sessionId=xxx
- * Clear chat history for a session
+ * Clear chat history for a session (removes from both cache and database)
  */
 export const DELETE: RequestHandler = async ({ url, locals }) => {
 	const session = await locals.auth();
@@ -56,7 +57,7 @@ export const DELETE: RequestHandler = async ({ url, locals }) => {
 	}
 
 	try {
-		clearChatHistory(sessionId);
+		await clearChatHistory(sessionId);
 		return json({ success: true });
 	} catch (error) {
 		console.error('Error clearing chat history:', error);
