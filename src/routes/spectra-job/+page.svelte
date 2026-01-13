@@ -1,4 +1,4 @@
-<!-- src/routes/spectra-job/+page.svelte -->
+<!-- src/routes/spectra-job/+page.svelte - v2 memory fix -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import MessageList from '$lib/components/MessageList.svelte';
@@ -86,9 +86,10 @@
 			// Batched update function using requestAnimationFrame
 			const flushPendingContent = () => {
 				if (pendingContent && messages[assistantMessageIndex]) {
+					// Direct mutation - Svelte 5 $state tracks nested changes
 					messages[assistantMessageIndex].content += pendingContent;
 					pendingContent = '';
-					messages = [...messages];
+					// NO array spread - direct mutation is reactive in Svelte 5
 				}
 				updateScheduled = false;
 			};
@@ -142,7 +143,6 @@
 			if (pendingContent && messages[assistantMessageIndex]) {
 				messages[assistantMessageIndex].content += pendingContent;
 				pendingContent = '';
-				messages = [...messages];
 			}
 
 			error = null;

@@ -80,6 +80,13 @@ export function getChatHistory(sessionId: string): ChatMessageV2[] {
 }
 
 /**
+ * Async version - same as sync for in-memory store
+ */
+export async function getChatHistoryAsync(sessionId: string): Promise<ChatMessageV2[]> {
+	return getChatHistory(sessionId);
+}
+
+/**
  * Get chat history prepared for API call (truncated if needed)
  */
 export function getPreparedChatHistory(
@@ -202,4 +209,11 @@ export function getSessionInfo(sessionId: string): { messageCount: number; lastA
 		messageCount: session.history.length,
 		lastActivity: new Date(session.lastActivity),
 	};
+}
+
+/**
+ * Preload session - no-op for in-memory store (already loaded)
+ */
+export async function preloadSession(_sessionId: string): Promise<void> {
+	// No-op for in-memory store
 }

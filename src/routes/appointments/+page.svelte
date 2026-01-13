@@ -147,30 +147,31 @@
 			const decoder = new TextDecoder();
 			let buffer = '';
 
+			// Batched update function using requestAnimationFrame
+			const flushPendingContent = () => {
+				if (pendingContent && messages[assistantMessageIndex]) {
+					// Direct mutation - Svelte 5 $state tracks nested changes
+					messages[assistantMessageIndex].content += pendingContent;
+					pendingContent = '';
+					// NO array spread - direct mutation is reactive in Svelte 5
+				}
+				updateScheduled = false;
+			};
+
+			const scheduleUpdate = (chunk: string) => {
+				pendingContent += chunk;
+				if (!updateScheduled) {
+					updateScheduled = true;
+					requestAnimationFrame(flushPendingContent);
+				}
+			};
+
 			while (true) {
 				const { done, value } = await reader.read();
 
 				if (done) break;
 
 				buffer += decoder.decode(value, { stream: true });
-
-				// Batched update function using requestAnimationFrame
-				const flushPendingContent = () => {
-					if (pendingContent && messages[assistantMessageIndex]) {
-						messages[assistantMessageIndex].content += pendingContent;
-						pendingContent = '';
-						messages = [...messages]; // Trigger reactivity
-					}
-					updateScheduled = false;
-				};
-
-				const scheduleUpdate = (chunk: string) => {
-					pendingContent += chunk;
-					if (!updateScheduled) {
-						updateScheduled = true;
-						requestAnimationFrame(flushPendingContent);
-					}
-				};
 
 				// Process complete SSE messages
 				const lines = buffer.split('\n\n');
@@ -207,7 +208,6 @@
 			if (pendingContent && messages[assistantMessageIndex]) {
 				messages[assistantMessageIndex].content += pendingContent;
 				pendingContent = '';
-				messages = [...messages];
 			}
 		} catch (error: any) {
 			// Don't show error if request was aborted
