@@ -251,12 +251,22 @@ export function getTokenUsage(
 }
 
 /**
- * Prepare chat history for API call - truncates if needed
+ * Strip internal fields (like _timestamp) that shouldn't be sent to Cohere API
+ */
+function stripInternalFields(message: ChatMessageV2): ChatMessageV2 {
+	const { _timestamp, ...cleanMessage } = message as ChatMessageV2 & { _timestamp?: string };
+	return cleanMessage;
+}
+
+/**
+ * Prepare chat history for API call - truncates if needed and strips internal fields
  */
 export function prepareChatHistory(
 	messages: ChatMessageV2[],
 	model: string = 'command-a-03-2025'
 ): ChatMessageV2[] {
 	const limit = getModelTokenLimit(model);
-	return truncateChatHistory(messages, limit);
+	const truncated = truncateChatHistory(messages, limit);
+	// Strip internal fields like _timestamp before sending to Cohere
+	return truncated.map(stripInternalFields);
 }

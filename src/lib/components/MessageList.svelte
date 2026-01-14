@@ -31,7 +31,7 @@
 			</div>
 		</div>
 	{:else}
-		{#each messages as message (message.timestamp.toString())}
+		{#each messages as message (message.timestamp)}
 			<MessageBubble {message} />
 		{/each}
 	{/if}
