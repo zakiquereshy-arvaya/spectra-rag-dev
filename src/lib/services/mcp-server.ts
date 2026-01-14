@@ -12,17 +12,21 @@ import { MicrosoftGraphAuth } from './microsoft-graph-auth';
 import { CohereService } from './cohere';
 import { CalendarAIHelper } from './ai-calendar-helpers';
 import type { ChatMessageV2 } from 'cohere-ai/api';
-import { getChatHistory, setChatHistory } from './chat-history-store';
+import { getChatHistoryAsync, setChatHistoryAsync } from './chat-history-store';
 import { prepareChatHistory } from '$lib/utils/tokens';
+
+// Extended message type with timestamp for storage
+type StoredChatMessage = ChatMessageV2 & { _timestamp?: string };
 
 export class MCPServer {
 	private graphService: MicrosoftGraphService;
 	private cohereService: CohereService;
 	private aiHelper: CalendarAIHelper | null;
 	private sessionId: string;
-	private chatHistory: ChatMessageV2[] = [];
+	private chatHistory: StoredChatMessage[] = [];
 	private loggedInUser: { name: string; email: string } | null = null;
 	private lastAvailabilityDate: string | null = null;
+	private lastTimestamp: number = 0; // Track last used timestamp to ensure uniqueness
 
 	// Cached user list to avoid N+1 queries - lazily loaded and reused within request
 	private cachedUsers: Array<{ name: string; email: string }> | null = null;
@@ -142,7 +146,10 @@ export class MCPServer {
 
 	
 	private convertToLocalTime(utcDateTime: string): string {
-		const date = new Date(utcDateTime);
+		// Graph API returns datetime WITHOUT 'Z' suffix, but times are in UTC
+		// Append 'Z' to ensure JavaScript interprets it as UTC, not local time
+		const dateStr = utcDateTime.endsWith('Z') ? utcDateTime : utcDateTime + 'Z';
+		const date = new Date(dateStr);
 		return date.toLocaleTimeString('en-US', {
 			hour: 'numeric',
 			minute: '2-digit',
@@ -153,7 +160,9 @@ export class MCPServer {
 
 	
 	private formatLocalDateTime(utcDateTime: string): string {
-		const date = new Date(utcDateTime);
+		// Graph API returns datetime WITHOUT 'Z' suffix, but times are in UTC
+		const dateTimeStr = utcDateTime.endsWith('Z') ? utcDateTime : utcDateTime + 'Z';
+		const date = new Date(dateTimeStr);
 		const dateStr = date.toLocaleDateString('en-US', {
 			weekday: 'short',
 			month: 'numeric',
@@ -197,6 +206,8 @@ export class MCPServer {
 		return date;
 	}
 
+	private historyLoaded: boolean = false;
+
 	constructor(
 		cohereApiKey: string,
 		sessionId: string,
@@ -213,8 +224,43 @@ export class MCPServer {
 			this.aiHelper = null;
 		}
 		this.sessionId = sessionId;
-		this.chatHistory = getChatHistory(sessionId);
+		this.chatHistory = []; // Will be loaded async
 		this.loggedInUser = loggedInUser || null;
+	}
+
+	/**
+	 * Load chat history from Supabase (call before processing)
+	 */
+	async loadHistory(): Promise<void> {
+		if (!this.historyLoaded) {
+			this.chatHistory = await getChatHistoryAsync(this.sessionId);
+			this.historyLoaded = true;
+		}
+	}
+
+	/**
+	 * Save chat history to Supabase
+	 */
+	async saveHistory(): Promise<void> {
+		await setChatHistoryAsync(this.sessionId, this.chatHistory);
+	}
+
+	/**
+	 * Add message(s) to chat history with timestamp
+	 * Ensures every message has a unique _timestamp field for proper ordering
+	 */
+	private pushToHistory(...messages: ChatMessageV2[]): void {
+		for (const msg of messages) {
+			// Ensure timestamp is always greater than the last one used
+			const now = Date.now();
+			const timestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1;
+			this.lastTimestamp = timestamp;
+
+			this.chatHistory.push({
+				...msg,
+				_timestamp: new Date(timestamp).toISOString(),
+			});
+		}
 	}
 
 	/**
@@ -687,6 +733,9 @@ export class MCPServer {
 		try {
 			console.log('Processing request:', userMessage);
 
+			// Load chat history from Supabase
+			await this.loadHistory();
+
 			// Get tools for Cohere
 			const tools = CohereService.createCalendarTools();
 			console.log('Created tools:', tools.length);
@@ -709,7 +758,7 @@ export class MCPServer {
 			// Handle tool calls if any
 			if (response.tool_calls && response.tool_calls.length > 0) {
 				// Add user message to history (after calling chat, before processing tool calls)
-				this.chatHistory.push({
+				this.pushToHistory({
 					role: 'user',
 					content: userMessage,
 				});
@@ -737,8 +786,8 @@ export class MCPServer {
 				if (!assistantMessage.content && !assistantMessage.toolCalls) {
 					assistantMessage.content = 'Processing request...';
 				}
-				
-				this.chatHistory.push(assistantMessage);
+
+				this.pushToHistory(assistantMessage);
 
 				// Execute tools and collect results
 				const toolResults: ChatMessageV2[] = [];
@@ -791,7 +840,7 @@ export class MCPServer {
 				}
 
 				// Add tool results to chat history
-				this.chatHistory.push(...toolResults);
+				this.pushToHistory(...toolResults);
 
 				// Get final response from Cohere - respond naturally to the user's question using tool results
 				// Use truncated history to fit within context window
@@ -834,27 +883,27 @@ export class MCPServer {
 				}
 
 				// Add final assistant response to chat history
-				this.chatHistory.push({
+				this.pushToHistory({
 					role: 'assistant',
 					content: responseText,
 				});
 
-				setChatHistory(this.sessionId, this.chatHistory);
+				await this.saveHistory();
 
 				return responseText;
 			} else {
-				this.chatHistory.push({
+				this.pushToHistory({
 					role: 'user',
 					content: userMessage,
 				});
 				const responseText = response.text?.trim() || 'I received your message. How can I help you?';
-				
-				this.chatHistory.push({
+
+				this.pushToHistory({
 					role: 'assistant',
 					content: responseText,
 				});
 
-				setChatHistory(this.sessionId, this.chatHistory);
+				await this.saveHistory();
 
 				return responseText;
 			}
@@ -880,6 +929,9 @@ export class MCPServer {
 			}
 
 			try {
+				// Load chat history from Supabase
+				await this.loadHistory();
+
 				// Get tools for Cohere
 				const tools = CohereService.createCalendarTools();
 
@@ -906,7 +958,7 @@ export class MCPServer {
 				}
 
 				// Add user message to history
-				this.chatHistory.push({
+				this.pushToHistory({
 					role: 'user',
 					content: userMessage,
 				});
@@ -914,16 +966,16 @@ export class MCPServer {
 				// Handle tool calls if any
 				if (toolCalls.length > 0) {
 					yield '\n\n[Processing tools...]\n\n';
-					
+
 					// Add assistant message with tool_calls to history
 					const assistantMessage: ChatMessageV2 = {
 						role: 'assistant',
 					};
-					
+
 					if (fullText) {
 						assistantMessage.content = fullText;
 					}
-					
+
 					if (toolCalls.length > 0) {
 						assistantMessage.toolCalls = toolCalls.map(tc => ({
 							id: tc.id,
@@ -934,13 +986,13 @@ export class MCPServer {
 							},
 						}));
 					}
-					
+
 					// Ensure message has either content or toolCalls
 					if (!assistantMessage.content && !assistantMessage.toolCalls) {
 						assistantMessage.content = 'Processing request...';
 					}
-					
-					this.chatHistory.push(assistantMessage);
+
+					this.pushToHistory(assistantMessage);
 
 					// Execute tools and collect results
 					const toolResults: ChatMessageV2[] = [];
@@ -983,7 +1035,7 @@ export class MCPServer {
 					}
 
 					// Add tool results to chat history
-					this.chatHistory.push(...toolResults);
+					this.pushToHistory(...toolResults);
 
 					// Get final response with streaming
 					const preparedHistoryForFinal = prepareChatHistory(this.chatHistory);
@@ -1008,21 +1060,21 @@ export class MCPServer {
 
 					// Add final response to history
 					const finalResponse = finalFullText || 'I processed your request. How else can I help you?';
-					this.chatHistory.push({
+					this.pushToHistory({
 						role: 'assistant',
 						content: finalResponse,
 					});
 				} else {
 					// No tool calls - just add the response to history
 					const responseText = fullText || 'I received your message. How can I help you?';
-					this.chatHistory.push({
+					this.pushToHistory({
 						role: 'assistant',
 						content: responseText,
 					});
 				}
 
 				// Save updated chat history
-				setChatHistory(this.sessionId, this.chatHistory);
+				await this.saveHistory();
 			} catch (error: any) {
 				console.error('Stream processing error:', error);
 				yield '\n\n[Error: ' + error.message + ']';
