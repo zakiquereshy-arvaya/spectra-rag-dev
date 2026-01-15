@@ -28,12 +28,8 @@ export class MCPServer {
 	private lastAvailabilityDate: string | null = null;
 	private lastTimestamp: number = 0; // Track last used timestamp to ensure uniqueness
 
-	// Cached user list to avoid N+1 queries - lazily loaded and reused within request
 	private cachedUsers: Array<{ name: string; email: string }> | null = null;
 
-	/**
-	 * Get cached users list - fetches from Graph API only once per request lifecycle
-	 */
 	private async getCachedUsers(): Promise<Array<{ name: string; email: string }>> {
 		if (this.cachedUsers === null) {
 			const users = await this.graphService.listUsers();
@@ -45,17 +41,10 @@ export class MCPServer {
 		return this.cachedUsers;
 	}
 
-	/**
-	 * Clear user cache - call this if you need fresh data
-	 */
 	private clearUserCache(): void {
 		this.cachedUsers = null;
 	}
 
-	/**
-	 * Parse natural language date strings like "next monday", "tomorrow", "1/12/2026"
-	 * Returns date in YYYY-MM-DD format
-	 */
 	private parseDate(dateString: string | undefined | null): string {
 		if (!dateString || dateString.trim() === '') {
 			const today = new Date();

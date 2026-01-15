@@ -1,4 +1,3 @@
-// Cohere API Service using Official SDK
 
 import { CohereClientV2 } from 'cohere-ai';
 import type { ChatMessageV2, ToolV2 } from 'cohere-ai/api';

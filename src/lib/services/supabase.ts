@@ -2,8 +2,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { SUPABASE_SERVICE_ROLE_KEY } from '$env/static/private';
-
-// Database types
 export interface ChatSession {
 	id: string;
 	messages: any[]; // ChatMessageV2[]
@@ -13,10 +11,6 @@ export interface ChatSession {
 
 let supabaseClient: SupabaseClient | null = null;
 
-/**
- * Get the Supabase client instance (singleton)
- * Uses service role key for server-side operations to bypass RLS
- */
 export function getSupabaseClient(): SupabaseClient {
 	if (!supabaseClient) {
 		if (!PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {

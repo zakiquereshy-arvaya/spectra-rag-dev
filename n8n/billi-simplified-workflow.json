@@ -1,0 +1,239 @@
+{
+  "name": "Billi Time Entry - Simplified (QB + Monday)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "billi-time-entry",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [320, 300],
+      "id": "webhook-trigger",
+      "name": "Webhook - Receive Time Entry",
+      "webhookId": "billi-time-entry-simplified"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform time entry for QuickBooks API\nconst timeEntry = $input.first().json.timeEntry;\n\nif (!timeEntry) {\n  throw new Error('Missing timeEntry in request body');\n}\n\n// Convert decimal hours to hours and minutes for QuickBooks\nconst totalHours = timeEntry.hours || 0;\nconst wholeHours = Math.floor(totalHours);\nconst decimalPart = totalHours - wholeHours;\nconst minutes = Math.round(decimalPart * 60);\n\nreturn [{\n  json: {\n    ...timeEntry,\n    qb_hours: wholeHours,\n    qb_minutes: minutes\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [540, 300],
+      "id": "transform-for-qb",
+      "name": "Transform for QuickBooks"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://quickbooks.api.intuit.com/v3/company/9341455408064358/timeactivity?minorversion=75",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "quickBooksOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"NameOf\": \"Employee\",\n  \"EmployeeRef\": {\n    \"value\": {{ $json.employee_qbo_id }}\n  },\n  \"BillableStatus\": {{ $json.billable ? '\"Billable\"' : '\"NotBillable\"' }},\n  \"CustomerRef\": {\n    \"value\": {{ $json.customer_qbo_id }}\n  },\n  \"Hours\": {{ $json.qb_hours }},\n  \"Minutes\": {{ $json.qb_minutes }},\n  \"Description\": {{ JSON.stringify($json.tasks_completed) }},\n  \"TxnDate\": {{ JSON.stringify($json.entry_date) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [760, 300],
+      "id": "post-to-quickbooks",
+      "name": "Post to QuickBooks",
+      "credentials": {
+        "quickBooksOAuth2Api": {
+          "id": "v9syusc6fs6DImC6",
+          "name": "QuickBooks Online account 2"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"employees\": {\n    \"Zaki Quereshy\": {\n      \"group_id\": \"group_mkygfez3\",\n      \"item_id\": \"10895802268\"\n    },\n    \"Mark Lohr\": {\n      \"group_id\": \"group_mkygpzze\",\n      \"item_id\": \"10895804532\"\n    },\n    \"David Hogg\": {\n      \"group_id\": \"group_mkygfg14\",\n      \"item_id\": \"10895798548\"\n    },\n    \"Ashlee E. Jack\": {\n      \"group_id\": \"group_mkyg57bh\",\n      \"item_id\": \"10895802315\"\n    },\n    \"Ryan Botindari\": {\n      \"group_id\": \"group_mkyg5hy0\",\n      \"item_id\": \"10895802243\"\n    },\n    \"Addie Brandt\": {\n      \"group_id\": \"group_mkz370ts\",\n      \"item_id\": \"10895798590\"\n    },\n    \"assistance\": {\n      \"group_id\": \"group_mkz732kc\",\n      \"item_id\": \"10895802106\"\n    },\n    \"Todd M. Fernley\": {\n      \"group_id\": \"group_mkz87jmj\",\n      \"item_id\": \"10895869209\"\n    },\n    \"Kyle Dalton\": {\n      \"group_id\": \"group_mkz8kdkr\",\n      \"item_id\": \"10895842744\"\n    },\n    \"Rachael A. Lindbolm\": {\n      \"group_id\": \"group_mkz8ra8n\",\n      \"item_id\": \"10895856522\"\n    }\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [760, 500],
+      "id": "employee-mapping",
+      "name": "Employee to Monday.com Mapping"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [980, 400],
+      "id": "merge-qb-and-mapping",
+      "name": "Merge QB Result + Mapping"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Monday.com update from time entry + employee mapping\nconst items = $input.all();\n\n// Find the time entry data (from QB response or original)\nlet timeEntry = null;\nlet employeeMapping = null;\nlet qbResponse = null;\n\nfor (const item of items) {\n  const json = item.json;\n  \n  if (json.employees) {\n    employeeMapping = json.employees;\n  }\n  \n  if (json.employee_name && json.customer_name) {\n    timeEntry = json;\n  }\n  \n  // Check for QB response\n  if (json.TimeActivity) {\n    qbResponse = json.TimeActivity;\n  }\n}\n\nif (!timeEntry) {\n  throw new Error('Missing time entry data');\n}\n\nif (!employeeMapping) {\n  throw new Error('Missing employee mapping');\n}\n\n// Normalize employee name for lookup\nconst normalizeName = (s = '') =>\n  s.toLowerCase().replace(/\\./g, '').replace(/\\s+/g, ' ').trim();\n\nconst normalizedInputName = normalizeName(timeEntry.employee_name);\n\n// Find employee in mapping\nlet employeeData = null;\nfor (const [key, value] of Object.entries(employeeMapping)) {\n  if (normalizeName(key) === normalizedInputName) {\n    employeeData = value;\n    break;\n  }\n}\n\nif (!employeeData) {\n  throw new Error(`Employee '${timeEntry.employee_name}' not found in Monday.com mapping`);\n}\n\n// Build update body\nconst tasks = timeEntry.tasks_completed || '';\nconst tasksText = typeof tasks === 'string' ? tasks : (Array.isArray(tasks) ? tasks.join('\\n') : String(tasks));\n\nlet update_body = `📅 Date: ${timeEntry.entry_date || ''}\n⏱️ Hours: ${timeEntry.hours || ''}\n📊 Project: ${timeEntry.customer_name || ''}\n👤 Customer: ${timeEntry.customer_name || ''}\n\n📝 Description:\n${tasksText}\n\n✅ Billable: ${timeEntry.billable ? 'Yes' : 'No'}\n\n🔖 Submitted by: ${timeEntry.submitted_by || ''}`;\n\nif (qbResponse) {\n  update_body += `\\n\\n✅ QuickBooks ID: ${qbResponse.Id || 'N/A'}`;\n}\n\nreturn [{\n  json: {\n    item_id: employeeData.item_id,\n    group_id: employeeData.group_id,\n    update_body,\n    timeEntry,\n    qbResponse\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 400],
+      "id": "build-monday-update",
+      "name": "Build Monday.com Update"
+    },
+    {
+      "parameters": {
+        "resource": "boardItem",
+        "operation": "addUpdate",
+        "itemId": "={{ $json.item_id }}",
+        "value": "={{ $json.update_body }}"
+      },
+      "type": "n8n-nodes-base.mondayCom",
+      "typeVersion": 1,
+      "position": [1420, 400],
+      "id": "monday-add-update",
+      "name": "Add Update to Monday.com",
+      "credentials": {
+        "mondayComApi": {
+          "id": "rbDfkIY6xJVcTBUB",
+          "name": "Monday.com account 2"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build final response\nconst input = $input.first().json;\n\nreturn [{\n  json: {\n    success: true,\n    quickbooks: input.qbResponse ? {\n      id: input.qbResponse.Id,\n      synced: true\n    } : {\n      synced: false\n    },\n    monday: {\n      item_id: input.item_id,\n      updated: true\n    },\n    timeEntry: input.timeEntry\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 400],
+      "id": "build-response",
+      "name": "Build Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1860, 400],
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook - Receive Time Entry": {
+      "main": [
+        [
+          {
+            "node": "Transform for QuickBooks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Employee to Monday.com Mapping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform for QuickBooks": {
+      "main": [
+        [
+          {
+            "node": "Post to QuickBooks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to QuickBooks": {
+      "main": [
+        [
+          {
+            "node": "Merge QB Result + Mapping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Employee to Monday.com Mapping": {
+      "main": [
+        [
+          {
+            "node": "Merge QB Result + Mapping",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge QB Result + Mapping": {
+      "main": [
+        [
+          {
+            "node": "Build Monday.com Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Monday.com Update": {
+      "main": [
+        [
+          {
+            "node": "Add Update to Monday.com",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Update to Monday.com": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
