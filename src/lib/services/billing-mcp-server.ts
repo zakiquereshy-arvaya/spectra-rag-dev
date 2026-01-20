@@ -101,6 +101,171 @@ export class BillingMCPServer {
 		return this.cachedCustomers;
 	}
 
+	// ==================== TIME ENTRY DETECTION ====================
+
+	/**
+	 * Extract text content from ChatMessageV2 content field
+	 */
+	private extractTextContent(content: any): string {
+		if (typeof content === 'string') {
+			return content;
+		}
+		if (Array.isArray(content)) {
+			return content.map(c => {
+				if (typeof c === 'string') return c;
+				if (c && typeof c === 'object') {
+					if ('text' in c && typeof (c as any).text === 'string') return (c as any).text;
+					return '';
+				}
+				return '';
+			}).join(' ');
+		}
+		return String(content || '');
+	}
+
+	/**
+	 * Check if response text claims to have logged time
+	 */
+	private claimsToHaveLoggedTime(text: string): boolean {
+		const lowerText = text.toLowerCase();
+		const claimPatterns = [
+			/logged.*hour/i,
+			/logged.*time/i,
+			/time.*logged/i,
+			/submitted.*time/i,
+			/time.*submitted/i,
+			/time entry.*logged/i,
+			/logged.*time entry/i,
+			/entry.*submitted/i,
+			/submitted.*entry/i,
+		];
+		return claimPatterns.some(pattern => pattern.test(lowerText));
+	}
+
+	/**
+	 * Extract time entry information from conversation context
+	 */
+	private extractTimeEntryInfo(): {
+		employee_name?: string;
+		employee_qbo_id?: string;
+		customer_name?: string;
+		customer_qbo_id?: string;
+		tasks_completed?: string;
+		hours?: number;
+		entry_date?: string;
+	} {
+		const info: any = {};
+		
+		// Look through recent chat history for tool results
+		for (let i = this.chatHistory.length - 1; i >= 0; i--) {
+			const msg = this.chatHistory[i];
+			
+			// Check tool results for lookup results
+			if (msg.role === 'tool' && msg.content) {
+				try {
+					const contentStr = this.extractTextContent(msg.content);
+					const result = JSON.parse(contentStr);
+					
+					// Found employee lookup result
+					if (result.found === true && result.employee) {
+						info.employee_name = result.employee.name;
+						info.employee_qbo_id = result.employee.qbo_id;
+					}
+					
+					// Found customer lookup result
+					if (result.found === true && result.customer) {
+						info.customer_name = result.customer.name;
+						info.customer_qbo_id = result.customer.qbo_id;
+					}
+				} catch {}
+			}
+			
+			// Check user message for time entry details
+			if (msg.role === 'user' && msg.content) {
+				const content = this.extractTextContent(msg.content);
+				const lowerContent = content.toLowerCase();
+				
+				// Extract hours - look for patterns like "16 Hours", "Total: 16 Hours", etc.
+				const hoursPatterns = [
+					/total[:\s]+(\d+(?:\.\d+)?)\s*hours?/i,
+					/(\d+(?:\.\d+)?)\s*hours?/i,
+				];
+				for (const pattern of hoursPatterns) {
+					const match = content.match(pattern);
+					if (match && !info.hours) {
+						info.hours = parseFloat(match[1]);
+						break;
+					}
+				}
+				
+				// Extract date patterns
+				const datePatterns = [
+					/(\d{1,2}\/\d{1,2}\/\d{4})/,
+					/(\d{4}-\d{2}-\d{2})/,
+					/today/i,
+					/yesterday/i,
+				];
+				for (const pattern of datePatterns) {
+					const match = lowerContent.match(pattern);
+					if (match && !info.entry_date) {
+						if (match[0].toLowerCase() === 'today') {
+							info.entry_date = new Date().toISOString().split('T')[0];
+						} else if (match[0].toLowerCase() === 'yesterday') {
+							const yesterday = new Date();
+							yesterday.setDate(yesterday.getDate() - 1);
+							info.entry_date = yesterday.toISOString().split('T')[0];
+						} else if (match[1]) {
+							// Parse date string
+							const dateStr = match[1];
+							if (dateStr.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+								const [month, day, year] = dateStr.split('/').map(Number);
+								info.entry_date = new Date(year, month - 1, day).toISOString().split('T')[0];
+							} else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+								info.entry_date = dateStr;
+							}
+						}
+						break;
+					}
+				}
+				
+				// Extract tasks description - look for numbered lists or bullet points
+				// Handle multi-line entries like "1. task one\n2. task two"
+				const numberedListMatch = content.match(/(?:\d+\.\s*.+?(?:\n|$))+/i);
+				if (numberedListMatch && !info.tasks_completed) {
+					info.tasks_completed = numberedListMatch[0].trim();
+				} else {
+					// Extract tasks description (everything after "for" or "-")
+					const forMatch = content.match(/(?:for|-\s*)(.+?)(?:\s+on\s+|\s+for\s+|\s*$)/i);
+					if (forMatch && !info.tasks_completed) {
+						info.tasks_completed = forMatch[1].trim();
+					}
+				}
+			}
+		}
+		
+		// Use logged-in user as employee if not found
+		if (!info.employee_name && this.loggedInUser) {
+			info.employee_name = this.loggedInUser.name;
+		}
+		
+		return info;
+	}
+
+	/**
+	 * Check if we have all required information for time entry
+	 */
+	private hasAllTimeEntryInfo(info: ReturnType<typeof this.extractTimeEntryInfo>): boolean {
+		return !!(
+			info.employee_name &&
+			info.employee_qbo_id &&
+			info.customer_name &&
+			info.customer_qbo_id &&
+			info.tasks_completed &&
+			info.hours &&
+			info.hours > 0
+		);
+	}
+
 	/**
 	 * Execute a billing tool
 	 */
@@ -313,17 +478,21 @@ export class BillingMCPServer {
 - You can log time entries - just need the customer (Arvaya, ICE, etc), hours, and what they worked on
 - That's it. Keep it simple.
 
-**INTERNAL WORKFLOW (never explain this to users):**
+**INTERNAL WORKFLOW (CRITICAL - MUST FOLLOW):**
 1. User: "log 2 hours for ICE - worked on migration"
-2. You silently call lookup_employee("${this.loggedInUser?.name || ''}")
-3. You silently call lookup_customer("ICE")
-4. You silently call submit_time_entry with entry_date="${todayStr}" (or the date user specified in YYYY-MM-DD)
-5. You respond: "Logged 2 hours for Infrastructure Consulting & Engineering: worked on migration"
+2. You MUST silently call lookup_employee("${this.loggedInUser?.name || ''}") to get employee_qbo_id
+3. You MUST silently call lookup_customer("ICE") to get customer_qbo_id
+4. You MUST call submit_time_entry with ALL required fields (employee_name, employee_qbo_id, customer_name, customer_qbo_id, tasks_completed, hours, entry_date)
+5. ONLY AFTER submit_time_entry returns success=true, you respond: "Logged 2 hours for Infrastructure Consulting & Engineering: worked on migration"
 
-**RULES:**
+**CRITICAL RULES:**
+- NEVER claim to have logged time without actually calling submit_time_entry
+- NEVER say "Logged X hours" unless submit_time_entry tool was called and returned success=true
+- You MUST call submit_time_entry when user requests time logging - it is REQUIRED, not optional
+- If you have all the information (employee, customer, hours, tasks), you MUST call submit_time_entry immediately
 - The logged-in user IS the employee - NEVER ask who they are
 - "Arvaya" and "ICE" are customer names
-- When user says "today", use entry_date="${todayStr}"
+- When user says "today", use entry_date="${todayStr}" (YYYY-MM-DD format)
 - NEVER mention: QuickBooks, QBO, IDs, lookups, internal tools
 - Just do the work silently and confirm when done`,
 			};
@@ -360,6 +529,39 @@ export class BillingMCPServer {
 					} else if (chunk.type === 'error') {
 						yield '\n\n[Error: ' + chunk.error + ']';
 						return;
+					}
+				}
+
+				// Check if AI claims to have logged time but didn't call the tool
+				const claimsLogged = this.claimsToHaveLoggedTime(fullText);
+				const hasSubmitCall = toolCalls.some(tc => tc.name === 'submit_time_entry');
+				
+				// If AI claims to have logged but didn't call tool, check if we can force it
+				if (claimsLogged && !hasSubmitCall && !timeEntryActuallySubmitted) {
+					const timeEntryInfo = this.extractTimeEntryInfo();
+					
+					if (this.hasAllTimeEntryInfo(timeEntryInfo)) {
+						console.log('[BillingMCP] AI claimed to log time but didn\'t call tool. Forcing submit_time_entry with extracted info:', timeEntryInfo);
+						// Force the tool call
+						toolCalls.push({
+							id: `forced-${Date.now()}`,
+							name: 'submit_time_entry',
+							parameters: {
+								employee_name: timeEntryInfo.employee_name,
+								employee_qbo_id: timeEntryInfo.employee_qbo_id,
+								customer_name: timeEntryInfo.customer_name,
+								customer_qbo_id: timeEntryInfo.customer_qbo_id,
+								tasks_completed: timeEntryInfo.tasks_completed,
+								hours: timeEntryInfo.hours,
+								entry_date: timeEntryInfo.entry_date || new Date().toISOString().split('T')[0],
+								billable: true,
+							},
+						});
+					} else {
+						// Missing info - force another iteration to get it
+						console.log('[BillingMCP] AI claimed to log time but missing info. Forcing lookup.', timeEntryInfo);
+						currentMessage = `You claimed to have logged time, but you must actually call submit_time_entry. First call lookup_employee and lookup_customer if needed, then call submit_time_entry with all required fields. Do not claim success until the tool is called.`;
+						continue;
 					}
 				}
 
@@ -415,7 +617,15 @@ export class BillingMCPServer {
 				} else if (timeEntryError) {
 					currentMessage = `Time entry failed: ${timeEntryError}. Report this error to user.`;
 				} else {
-					currentMessage = 'Continue. You have the lookup results. Now call submit_time_entry with all the required fields.';
+					// Check if we have lookup results but didn't submit
+					const hasLookups = toolCalls.some(tc => 
+						tc.name === 'lookup_employee' || tc.name === 'lookup_customer'
+					);
+					if (hasLookups) {
+						currentMessage = 'You have lookup results. You MUST now call submit_time_entry with the employee_qbo_id and customer_qbo_id from the lookup results. Do not claim success without calling the tool.';
+					} else {
+						currentMessage = 'Continue with the task. If you have all the information needed (employee, customer, hours, tasks), you MUST call submit_time_entry. Never claim to have logged time without calling the tool.';
+					}
 				}
 			}
 
