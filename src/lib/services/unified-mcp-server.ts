@@ -407,11 +407,21 @@ export class UnifiedMCPServer {
 					} = args;
 
 					if (!employee_name || !employee_qbo_id) {
-						throw new Error('Employee name and QBO ID required. Use lookup_employee first.');
+						throw new Error('STOP. You must call lookup_employee first to get the real QBO ID. Do not make up IDs.');
 					}
 					if (!customer_name || !customer_qbo_id) {
-						throw new Error('Customer name and QBO ID required. Use lookup_customer first.');
+						throw new Error('STOP. You must call lookup_customer first to get the real QBO ID. Do not make up IDs.');
 					}
+
+					// REJECT FAKE/PLACEHOLDER IDs - must be real from database lookups
+					const fakeIdPatterns = /^(EMP|CUST|ID|QBO|TEST|PLACEHOLDER|XXX|000)/i;
+					if (fakeIdPatterns.test(employee_qbo_id) || employee_qbo_id.length < 3) {
+						throw new Error(`INVALID employee_qbo_id "${employee_qbo_id}". You MUST call lookup_employee("${employee_name}") first to get the real ID from the database.`);
+					}
+					if (fakeIdPatterns.test(customer_qbo_id) || customer_qbo_id.length < 3) {
+						throw new Error(`INVALID customer_qbo_id "${customer_qbo_id}". You MUST call lookup_customer("${customer_name}") first to get the real ID from the database.`);
+					}
+
 					if (!tasks_completed) throw new Error('Tasks completed description is required');
 					if (hours === undefined || hours <= 0) throw new Error('Hours must be positive');
 

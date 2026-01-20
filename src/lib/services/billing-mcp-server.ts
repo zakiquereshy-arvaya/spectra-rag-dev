@@ -199,15 +199,21 @@ export class BillingMCPServer {
 
 					// Validate required fields
 					if (!employee_name || !employee_qbo_id) {
-						throw new Error(
-							'Employee name and QBO ID are required. Use lookup_employee first to get these values.'
-						);
+						throw new Error('STOP. You must call lookup_employee first to get the real QBO ID.');
 					}
 					if (!customer_name || !customer_qbo_id) {
-						throw new Error(
-							'Customer name and QBO ID are required. Use lookup_customer first to get these values.'
-						);
+						throw new Error('STOP. You must call lookup_customer first to get the real QBO ID.');
 					}
+
+					// REJECT FAKE/PLACEHOLDER IDs - must be real from database lookups
+					const fakeIdPatterns = /^(EMP|CUST|ID|QBO|TEST|PLACEHOLDER|XXX|000)/i;
+					if (fakeIdPatterns.test(employee_qbo_id) || employee_qbo_id.length < 3) {
+						throw new Error(`INVALID employee_qbo_id "${employee_qbo_id}". Call lookup_employee("${employee_name}") to get the real ID.`);
+					}
+					if (fakeIdPatterns.test(customer_qbo_id) || customer_qbo_id.length < 3) {
+						throw new Error(`INVALID customer_qbo_id "${customer_qbo_id}". Call lookup_customer("${customer_name}") to get the real ID.`);
+					}
+
 					if (!tasks_completed) {
 						throw new Error('Tasks completed description is required');
 					}

@@ -56,7 +56,8 @@ export async function getEmployeeByName(name: string): Promise<Employee | null> 
 // Customer name aliases for common shortcuts
 const CUSTOMER_ALIASES: Record<string, string> = {
 	'ice': 'Infrastructure Consulting & Engineering',
-	'arvaya': 'Arvaya',
+	'arvaya': 'Arvaya Internal',
+	'arvaya internal': 'Arvaya Internal',
 };
 
 /**
