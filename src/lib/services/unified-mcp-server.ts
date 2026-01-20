@@ -544,12 +544,27 @@ export class UnifiedMCPServer {
 				this.pushToHistory(assistantMessage);
 
 				const toolResults: ChatMessageV2[] = [];
+				const executedTools: string[] = [];
+				let timeEntryActuallySubmitted = false;
+				let timeEntryError: string | null = null;
+
 				for (const toolCall of toolCalls) {
 					try {
 						console.log(`[UnifiedMCP] Executing tool: ${toolCall.name}`);
 						const result = await this.callTool(toolCall.name, toolCall.parameters);
+						executedTools.push(toolCall.name);
+
+						// Track if time entry was ACTUALLY submitted
+						if (toolCall.name === 'submit_time_entry' && result.success === true) {
+							timeEntryActuallySubmitted = true;
+							console.log(`[UnifiedMCP] TIME ENTRY SUBMITTED SUCCESSFULLY`);
+						}
+
 						toolResults.push({ role: 'tool', content: JSON.stringify(result), toolCallId: toolCall.id });
 					} catch (error: any) {
+						if (toolCall.name === 'submit_time_entry') {
+							timeEntryError = error.message;
+						}
 						toolResults.push({
 							role: 'tool',
 							content: JSON.stringify({ success: false, error: error.message, tool: toolCall.name }),
@@ -563,11 +578,23 @@ export class UnifiedMCPServer {
 				const preparedHistoryForFinal = prepareChatHistory(this.chatHistory);
 				let finalFullText = '';
 
-				// Check if submit_time_entry was called - if so, provide specific instructions
-				const hasTimeEntrySubmission = toolCalls.some(tc => tc.name === 'submit_time_entry');
-				const finalPrompt = hasTimeEntrySubmission
-					? `Based on the tool results, provide a clear confirmation to the user. IMPORTANT: For time entry confirmations, show ONLY the employee name and customer name (NO QBO IDs). Display the tasks_completed summary nicely formatted. This summary is what gets sent to the workflow and placed on Monday/QBO. Never mention QBO IDs or CustomerId fields in your response.`
-					: 'Based on the tool results, provide a clear and helpful response to the user.';
+				// Build final prompt based on what ACTUALLY happened
+				let finalPrompt: string;
+				const hasTimeEntryCall = toolCalls.some(tc => tc.name === 'submit_time_entry');
+
+				if (hasTimeEntryCall) {
+					if (timeEntryActuallySubmitted) {
+						finalPrompt = `The time entry was SUCCESSFULLY submitted. Based on the tool results, confirm this to the user. Show employee name, customer name, hours, and description. NEVER show QBO IDs.`;
+					} else if (timeEntryError) {
+						finalPrompt = `The time entry FAILED with error: "${timeEntryError}". Tell the user it failed and explain the error. Do NOT claim success.`;
+					} else {
+						finalPrompt = `Report the actual tool results to the user. Only claim success if the tool result shows success:true.`;
+					}
+				} else if (executedTools.length > 0) {
+					finalPrompt = `Based on the tool results, provide a clear and helpful response. If lookups returned suggestions, automatically use the best match - do NOT ask for confirmation.`;
+				} else {
+					finalPrompt = `No tools were executed. Ask the user for more information to proceed.`;
+				}
 
 				for await (const chunk of this.cohereService.chatStream(
 					finalPrompt,

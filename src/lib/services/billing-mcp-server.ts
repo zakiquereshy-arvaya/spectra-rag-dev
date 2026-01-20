@@ -369,13 +369,22 @@ export class BillingMCPServer {
 
 				this.pushToHistory(assistantMessage);
 
-				// Execute tools
+				// Execute tools and track actual results
 				const toolResults: ChatMessageV2[] = [];
+				let timeEntryActuallySubmitted = false;
+				let timeEntryError: string | null = null;
+
 				for (const toolCall of toolCalls) {
 					try {
 						console.log(`[BillingMCP] Executing tool: ${toolCall.name}`, toolCall.parameters);
 						const result = await this.callTool(toolCall.name, toolCall.parameters);
-						console.log(`[BillingMCP] Tool ${toolCall.name} succeeded`);
+
+						// Track if time entry was ACTUALLY submitted
+						if (toolCall.name === 'submit_time_entry' && result.success === true) {
+							timeEntryActuallySubmitted = true;
+							console.log(`[BillingMCP] TIME ENTRY SUBMITTED SUCCESSFULLY`);
+						}
+
 						toolResults.push({
 							role: 'tool',
 							content: JSON.stringify(result),
@@ -383,6 +392,9 @@ export class BillingMCPServer {
 						});
 					} catch (error: any) {
 						console.error(`[BillingMCP] Tool ${toolCall.name} failed:`, error);
+						if (toolCall.name === 'submit_time_entry') {
+							timeEntryError = error.message;
+						}
 						toolResults.push({
 							role: 'tool',
 							content: JSON.stringify({
@@ -397,12 +409,28 @@ export class BillingMCPServer {
 
 				this.pushToHistory(...toolResults);
 
-				// Get final response
+				// Get final response - based on what ACTUALLY happened
 				const preparedHistoryForFinal = prepareChatHistory(this.chatHistory);
 				let finalFullText = '';
 
+				// Build prompt based on actual tool execution results
+				const hasTimeEntryCall = toolCalls.some(tc => tc.name === 'submit_time_entry');
+				let finalPrompt: string;
+
+				if (hasTimeEntryCall) {
+					if (timeEntryActuallySubmitted) {
+						finalPrompt = `The time entry was SUCCESSFULLY submitted to QuickBooks/Monday. Confirm this to the user with the details. NEVER show QBO IDs.`;
+					} else if (timeEntryError) {
+						finalPrompt = `The time entry FAILED with error: "${timeEntryError}". Tell the user it failed. Do NOT claim success.`;
+					} else {
+						finalPrompt = `Check the tool results and report accurately. Only claim success if submit_time_entry returned success:true.`;
+					}
+				} else {
+					finalPrompt = `Based on the lookup results, if suggestions were returned, automatically proceed with the best match. Do not ask for confirmation - just do it.`;
+				}
+
 				for await (const chunk of this.cohereService.chatStream(
-					'Based on the tool results, provide a clear response to the user. If a time entry was submitted successfully, confirm the details. If there were errors, explain what went wrong and how to fix it.',
+					finalPrompt,
 					tools,
 					[systemMessage, ...preparedHistoryForFinal],
 					'NONE'
@@ -415,7 +443,7 @@ export class BillingMCPServer {
 					}
 				}
 
-				const finalResponse = finalFullText || 'Time entry processed.';
+				const finalResponse = finalFullText || (timeEntryActuallySubmitted ? 'Time entry submitted.' : 'Request processed.');
 				this.pushToHistory({
 					role: 'assistant',
 					content: finalResponse,
