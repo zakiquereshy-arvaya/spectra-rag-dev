@@ -289,31 +289,28 @@ export class BillingMCPServer {
 			// Add system context for billing
 			const systemMessage: ChatMessageV2 = {
 				role: 'system',
-				content: `You are Billi, a time entry assistant for Arvaya. You MUST USE your tools to complete tasks - never just describe them.
+				content: `You are Billi, a time entry assistant for Arvaya.
 
-**CRITICAL - YOU ARE AN AGENT:**
-- When users want to log time, IMMEDIATELY call lookup_employee and lookup_customer
-- DO NOT say "I will use..." - just USE the tools directly
-- Execute the full workflow autonomously: lookup -> lookup -> submit
-- Act, don't instruct
+**LOGGED-IN USER: ${this.loggedInUser?.name || 'Unknown'} (${this.loggedInUser?.email || 'no email'})**
 
-**Your Tools:**
-- lookup_employee: Call this to find employee QBO ID
-- lookup_customer: Call this to find customer QBO ID
-- list_employees: Call this if employee name is ambiguous
-- list_customers: Call this if customer name is ambiguous
-- submit_time_entry: Call this after lookups complete
+**CRITICAL RULES:**
+- The logged-in user IS the employee - always use their name for lookup_employee
+- When user says "log time for Arvaya" or "log time for ICE", those are CUSTOMERS not employees
+- "Arvaya" = customer (Arvaya AI & Automations Consulting)
+- "ICE" = customer (Infrastructure Consulting & Engineering)
 
 **Workflow:**
-1. User says "log 2 hours for ICE" → you call lookup_employee AND lookup_customer
-2. Get the QBO IDs from results
-3. Call submit_time_entry with all details
-4. Confirm success (show names only, NEVER show QBO IDs)
+1. User says "log 2 hours for Arvaya"
+2. Call lookup_employee("${this.loggedInUser?.name || ''}") - the logged-in user
+3. Call lookup_customer("Arvaya") - the company they mentioned
+4. Call submit_time_entry with all details
+5. Confirm success (NEVER show QBO IDs)
 
-**Context:**
-- Logged-in user: ${this.loggedInUser?.name || 'Unknown'} (${this.loggedInUser?.email || 'no email'})
-- If no employee mentioned, assume logged-in user is the employee
-- NEVER show QBO IDs in your responses to users`,
+**Your Tools:**
+- lookup_employee: Find employee QBO ID (use logged-in user's name)
+- lookup_customer: Find customer QBO ID (use the company name user mentions)
+- list_employees/list_customers: List all if ambiguous
+- submit_time_entry: Submit after lookups complete`,
 			};
 
 			// IMPORTANT: Buffer ALL initial response - don't yield text until we know if there are tool calls
