@@ -1,0 +1,102 @@
+// MoE Stream endpoint - Routes to appropriate expert based on classification
+import type { RequestHandler } from './$types';
+import { MoERouter } from '$lib/services/moe-router';
+import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
+import { getAccessToken } from '$lib/utils/auth';
+import {
+	COHERE_API_KEY,
+	AUTH_MICROSOFT_ENTRA_ID_ID,
+	AUTH_MICROSOFT_ENTRA_ID_SECRET,
+	AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+	AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
+	BILLI_DEV_WEBHOOK_URL,
+} from '$env/static/private';
+
+export const POST: RequestHandler = async (event) => {
+	const session = await event.locals.auth();
+
+	if (!session) {
+		return new Response('Unauthorized', { status: 401 });
+	}
+
+	const cohereApiKey = COHERE_API_KEY;
+	if (!cohereApiKey) {
+		return new Response('Cohere API key not configured', { status: 500 });
+	}
+
+	// Set up Microsoft Graph auth
+	const issuer = AUTH_MICROSOFT_ENTRA_ID_ISSUER || '';
+	const tenantId = AUTH_MICROSOFT_ENTRA_ID_TENANT_ID || (issuer ? issuer.split('/')[3] : null);
+	const clientId = AUTH_MICROSOFT_ENTRA_ID_ID;
+	const clientSecret = AUTH_MICROSOFT_ENTRA_ID_SECRET;
+
+	let authService: MicrosoftGraphAuth | undefined;
+	if (tenantId && clientId && clientSecret) {
+		authService = new MicrosoftGraphAuth(tenantId, clientId, clientSecret);
+	}
+
+	const accessToken = getAccessToken(session);
+
+	try {
+		const body = await event.request.json();
+		const { message, sessionId } = body;
+
+		if (!message) {
+			return new Response(JSON.stringify({ error: 'Message is required' }), {
+				status: 400,
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
+
+		// Get logged-in user information
+		const loggedInUser = session.user
+			? {
+					name: session.user.name || session.user.email || 'Unknown User',
+					email: session.user.email || (session.user as any).userPrincipalName || '',
+				}
+			: undefined;
+
+		// Create MoE Router
+		const router = new MoERouter({
+			cohereApiKey,
+			sessionId: sessionId || 'default',
+			authService,
+			accessToken: accessToken || undefined,
+			loggedInUser,
+			webhookUrl: BILLI_DEV_WEBHOOK_URL,
+		});
+
+		// Create streaming response
+		const stream = new ReadableStream({
+			async start(controller) {
+				const encoder = new TextEncoder();
+
+				try {
+					for await (const chunk of router.handleRequestStream({ message, sessionId })) {
+						controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
+					}
+					controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+				} catch (error: any) {
+					console.error('[MoE Stream] Error:', error);
+					controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: error.message })}\n\n`));
+				} finally {
+					controller.close();
+				}
+			},
+		});
+
+		return new Response(stream, {
+			headers: {
+				'Content-Type': 'text/event-stream',
+				'Cache-Control': 'no-cache',
+				Connection: 'keep-alive',
+			},
+		});
+	} catch (error: any) {
+		console.error('[MoE Stream] API error:', error);
+		return new Response(JSON.stringify({ error: error.message }), {
+			status: 500,
+			headers: { 'Content-Type': 'application/json' },
+		});
+	}
+};

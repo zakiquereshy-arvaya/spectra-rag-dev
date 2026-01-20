@@ -925,10 +925,11 @@ export class MCPServer {
 				const tools = CohereService.createCalendarTools();
 
 				// Call Cohere with streaming - pass truncated chat history
+				// IMPORTANT: Buffer ALL initial response - don't yield text until we know if there are tool calls
 				const preparedHistory = prepareChatHistory(this.chatHistory);
 				let fullText = '';
 				const toolCalls: any[] = [];
-				
+
 				for await (const chunk of this.cohereService.chatStream(
 					userMessage,
 					tools,
@@ -937,7 +938,7 @@ export class MCPServer {
 				)) {
 					if (chunk.type === 'text' && chunk.content) {
 						fullText += chunk.content;
-						yield chunk.content; // Stream text chunks to client
+						// DON'T yield text here - buffer it until we know if there are tool calls
 					} else if (chunk.type === 'tool_call' && chunk.toolCall) {
 						toolCalls.push(chunk.toolCall);
 					} else if (chunk.type === 'error') {
@@ -954,7 +955,7 @@ export class MCPServer {
 
 				// Handle tool calls if any
 				if (toolCalls.length > 0) {
-					yield '\n\n[Processing tools...]\n\n';
+					// Tool calls present - DON'T show the buffered text, just process tools silently
 
 					// Add assistant message with tool_calls to history
 					const assistantMessage: ChatMessageV2 = {
@@ -1054,8 +1055,9 @@ export class MCPServer {
 						content: finalResponse,
 					});
 				} else {
-					// No tool calls - just add the response to history
+					// No tool calls - yield the buffered text to the user
 					const responseText = fullText || 'I received your message. How can I help you?';
+					yield responseText;
 					this.pushToHistory({
 						role: 'assistant',
 						content: responseText,

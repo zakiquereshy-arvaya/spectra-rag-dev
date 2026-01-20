@@ -1,4 +1,4 @@
-<!-- src/routes/+page.svelte -->
+<!-- src/routes/+page.svelte - Arvaya Developer Portal -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { signIn } from '@auth/sveltekit/client';
@@ -6,225 +6,213 @@
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	const tools = [
+		{
+			name: 'Billi',
+			description: 'Unified AI assistant for calendar management and time tracking',
+			href: '/moe',
+			icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z',
+			gradient: 'from-amber-500 to-orange-600',
+			bgGradient: 'from-amber-500/10 to-orange-500/10',
+			primary: true,
+		},
+		{
+			name: 'Spectra RAG',
+			description: 'AI-powered recruitment search across all platforms',
+			href: '/spectra-job',
+			icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
+			gradient: 'from-violet-500 to-purple-600',
+			bgGradient: 'from-violet-500/10 to-purple-500/10',
+		},
+		{
+			name: 'Calendar',
+			description: 'Book meetings and check availability',
+			href: '/appointments',
+			icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
+			gradient: 'from-sky-500 to-blue-600',
+			bgGradient: 'from-sky-500/10 to-blue-500/10',
+		},
+		{
+			name: 'Time Entry',
+			description: 'Log hours to QuickBooks and Monday.com',
+			href: '/billi',
+			icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+			gradient: 'from-emerald-500 to-teal-600',
+			bgGradient: 'from-emerald-500/10 to-teal-500/10',
+		},
+	];
 </script>
 
-<div class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-	<section class="px-6 py-20 lg:py-32">
-		<div class="max-w-4xl mx-auto text-center">
-			<!-- Company Logo -->
-			<div class="flex justify-center mb-8">
-				<img src={ArvayaLogo} alt="Arvaya Logo" class="h-16 md:h-20" />
+<div class="min-h-screen bg-slate-950">
+	<!-- Hero Section -->
+	<section class="relative overflow-hidden">
+		<!-- Background Pattern -->
+		<div class="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900"></div>
+		<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-500/10 via-transparent to-transparent"></div>
+		<div class="absolute inset-0" style="background-image: url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%22%23ffffff%22 fill-opacity=%220.02%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E');"></div>
+
+		<div class="relative px-6 py-20 lg:py-32">
+			<div class="max-w-5xl mx-auto">
+				{#if !data.session}
+					<!-- Login State -->
+					<div class="text-center">
+						<div class="flex justify-center mb-8">
+							<img src={ArvayaLogo} alt="Arvaya" class="h-16 md:h-20" />
+						</div>
+						<h1 class="text-4xl lg:text-6xl font-bold text-white mb-6">
+							Developer Portal
+						</h1>
+						<p class="text-lg text-slate-400 mb-10 max-w-xl mx-auto">
+							Internal tools and AI assistants for the Arvaya team
+						</p>
+						<button
+							onclick={() => signIn('microsoft-entra-id')}
+							class="inline-flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-semibold text-lg
+							       hover:from-amber-400 hover:to-orange-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-slate-950
+							       transition-all duration-200 shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/30"
+						>
+							<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+								<path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z"/>
+							</svg>
+							Sign in with Microsoft
+						</button>
+					</div>
+				{:else}
+					<!-- Authenticated State -->
+					<div class="text-center mb-16">
+						<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium mb-6">
+							<span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+							Welcome back, {data.session.user?.name?.split(' ')[0] || 'Developer'}
+						</div>
+						<h1 class="text-4xl lg:text-5xl font-bold text-white mb-4">
+							Arvaya Developer Portal
+						</h1>
+						<p class="text-lg text-slate-400 max-w-2xl mx-auto">
+							Your hub for AI-powered tools and automation. Select a tool below to get started.
+						</p>
+					</div>
+
+					<!-- Tools Grid -->
+					<div class="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+						{#each tools as tool}
+							<button
+								onclick={() => goto(tool.href)}
+								class="group relative p-6 rounded-2xl bg-slate-900/50 border border-slate-800 hover:border-slate-700
+								       text-left transition-all duration-300 hover:shadow-2xl hover:-translate-y-1
+								       {tool.primary ? 'md:col-span-2' : ''}"
+							>
+								<!-- Hover gradient overlay -->
+								<div class="absolute inset-0 rounded-2xl bg-gradient-to-br {tool.bgGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+
+								<div class="relative flex items-start gap-4">
+									<!-- Icon -->
+									<div class="flex-shrink-0 w-14 h-14 rounded-xl bg-gradient-to-br {tool.gradient} flex items-center justify-center shadow-lg group-hover:shadow-xl transition-shadow">
+										<svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={tool.icon}></path>
+										</svg>
+									</div>
+
+									<!-- Content -->
+									<div class="flex-1">
+										<div class="flex items-center gap-2 mb-1">
+											<h3 class="text-xl font-semibold text-white group-hover:text-amber-400 transition-colors">
+												{tool.name}
+											</h3>
+											{#if tool.primary}
+												<span class="px-2 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-400 rounded-full">
+													Recommended
+												</span>
+											{/if}
+										</div>
+										<p class="text-slate-400 group-hover:text-slate-300 transition-colors">
+											{tool.description}
+										</p>
+									</div>
+
+									<!-- Arrow -->
+									<div class="flex-shrink-0 w-10 h-10 rounded-full bg-slate-800 group-hover:bg-slate-700 flex items-center justify-center transition-colors">
+										<svg class="w-5 h-5 text-slate-500 group-hover:text-white transition-colors transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+										</svg>
+									</div>
+								</div>
+							</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
-			
-			{#if !data.session}
-				<!-- Login Section -->
-				<h1 class="text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-6">
-					Welcome to
-					<span class="text-blue-600 dark:text-blue-400">Arvaya's AI Project Development Portal</span>
-				</h1>
-				<p class="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
-					Please sign in with your Microsoft account to continue.
-				</p>
-				<div class="flex justify-center">
+		</div>
+	</section>
+
+	{#if data.session}
+		<!-- Quick Stats Section -->
+		<section class="px-6 py-16 border-t border-slate-800">
+			<div class="max-w-4xl mx-auto">
+				<h2 class="text-2xl font-bold text-white mb-8 text-center">Quick Actions</h2>
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
 					<button
-						onclick={() => signIn('microsoft-entra-id')}
-						class="px-8 py-4 bg-blue-600 text-white rounded-lg font-semibold text-lg
-						       hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-						       transition-colors shadow-lg hover:shadow-xl"
+						onclick={() => goto('/moe')}
+						class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/50 transition-all group"
 					>
-						Sign in with Microsoft
+						<div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center mb-3 group-hover:bg-amber-500/20 transition-colors">
+							<svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+							</svg>
+						</div>
+						<p class="text-sm font-medium text-white">Chat with Billi</p>
+						<p class="text-xs text-slate-500 mt-1">Ask anything</p>
 					</button>
-				</div>
-			{:else}
-				<!-- Authenticated Content -->
-				<h1 class="text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-6">
-					Spectra RAG
-					<span class="text-blue-600 dark:text-blue-400">Development</span>
-				</h1>
-				<p class="text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
-					The Vector Database and Search and Rank is the lifeblood of Spectra's new smart recruitment engine. This is the current endeavor
-				</p>
-				<p class="text-lg text-gray-500 dark:text-gray-400 mb-12 max-w-2xl mx-auto">
-					Instead of tying you to services piece by piece with multiple menus, we store everything in our vector database (AI-Native Database) where you can search for the best candidate across all platforms, unified together in one chat.
-				</p>
-				<div class="flex flex-col sm:flex-row gap-4 justify-center">
+
+					<button
+						onclick={() => goto('/moe')}
+						class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-sky-500/50 hover:bg-slate-800/50 transition-all group"
+					>
+						<div class="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center mb-3 group-hover:bg-sky-500/20 transition-colors">
+							<svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+							</svg>
+						</div>
+						<p class="text-sm font-medium text-white">Check Calendar</p>
+						<p class="text-xs text-slate-500 mt-1">View availability</p>
+					</button>
+
+					<button
+						onclick={() => goto('/moe')}
+						class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-800/50 transition-all group"
+					>
+						<div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:bg-emerald-500/20 transition-colors">
+							<svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+							</svg>
+						</div>
+						<p class="text-sm font-medium text-white">Log Time</p>
+						<p class="text-xs text-slate-500 mt-1">Track hours</p>
+					</button>
+
 					<button
 						onclick={() => goto('/spectra-job')}
-						class="px-8 py-4 bg-blue-600 text-white rounded-lg font-semibold text-lg
-						       hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-						       transition-colors shadow-lg hover:shadow-xl"
+						class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-violet-500/50 hover:bg-slate-800/50 transition-all group"
 					>
-						Start Chatting
-					</button>
-					<button
-						onclick={() => {
-							document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' });
-						}}
-						class="px-8 py-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-2 border-gray-300 dark:border-gray-700 rounded-lg font-semibold text-lg
-						       hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2
-						       transition-colors"
-					>
-						Learn More
+						<div class="w-10 h-10 rounded-lg bg-violet-500/10 flex items-center justify-center mb-3 group-hover:bg-violet-500/20 transition-colors">
+							<svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+							</svg>
+						</div>
+						<p class="text-sm font-medium text-white">Search Candidates</p>
+						<p class="text-xs text-slate-500 mt-1">RAG search</p>
 					</button>
 				</div>
-			{/if}
-		</div>
-	</section>
-
-	<!-- Features Section -->
-	<section id="features" class="px-6 py-20 bg-white dark:bg-gray-800">
-		<div class="max-w-6xl mx-auto">
-			<h2 class="text-4xl font-bold text-center text-gray-900 dark:text-white mb-12">
-				Key Features
-			</h2>
-			<div class="grid md:grid-cols-3 gap-8">
-				<!-- Feature 1 -->
-				<div class="p-6 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-800">
-					<div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mb-4">
-						<svg
-							class="w-6 h-6 text-white"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-							></path>
-						</svg>
-					</div>
-					<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-						Unified Search
-					</h3>
-					<p class="text-gray-600 dark:text-gray-300">
-						Search across all platforms (Indeed, LinkedIn, Glassdoor, Taleo) in one unified interface.
-					</p>
-				</div>
-
-				<!-- Feature 2 -->
-				<div class="p-6 rounded-xl bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-800">
-					<div class="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center mb-4">
-						<svg
-							class="w-6 h-6 text-white"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-							></path>
-						</svg>
-					</div>
-					<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-						Smart Ranking
-					</h3>
-					<p class="text-gray-600 dark:text-gray-300">
-						AI-powered ranking algorithm that finds the best candidates based on your requirements.
-					</p>
-				</div>
-
-				<!-- Feature 3 -->
-				<div class="p-6 rounded-xl bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-800">
-					<div class="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center mb-4">
-						<svg
-							class="w-6 h-6 text-white"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M13 10V3L4 14h7v7l9-11h-7z"
-							></path>
-						</svg>
-					</div>
-					<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-						AI-Native Database
-					</h3>
-					<p class="text-gray-600 dark:text-gray-300">
-						Vector database powered by Cohere embeddings and Pinecone for lightning-fast semantic search.
-					</p>
-				</div>
 			</div>
-		</div>
-	</section>
+		</section>
+	{/if}
 
-	<!-- How It Works Section -->
-	<section class="px-6 py-20 bg-gray-50 dark:bg-gray-900">
-		<div class="max-w-4xl mx-auto">
-			<h2 class="text-4xl font-bold text-center text-gray-900 dark:text-white mb-12">
-				How It Works
-			</h2>
-			<div class="space-y-8">
-				<div class="flex gap-6">
-					<div class="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-xl">
-						1
-					</div>
-					<div>
-						<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-							Data Ingestion
-						</h3>
-						<p class="text-gray-600 dark:text-gray-300">
-							Data is extracted from multiple sources (Indeed, LinkedIn, Glassdoor, Taleo) and cleaned for consistency.
-						</p>
-					</div>
-				</div>
-
-				<div class="flex gap-6">
-					<div class="flex-shrink-0 w-12 h-12 bg-purple-600 text-white rounded-full flex items-center justify-center font-bold text-xl">
-						2
-					</div>
-					<div>
-						<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-							Vector Embedding
-						</h3>
-						<p class="text-gray-600 dark:text-gray-300">
-							Candidate profiles are converted to embeddings using Cohere's embedding model and stored in Pinecone.
-						</p>
-					</div>
-				</div>
-
-				<div class="flex gap-6">
-					<div class="flex-shrink-0 w-12 h-12 bg-green-600 text-white rounded-full flex items-center justify-center font-bold text-xl">
-						3
-					</div>
-					<div>
-						<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-							Search & Rank
-						</h3>
-						<p class="text-gray-600 dark:text-gray-300">
-							Your query is converted to an embedding, matched against candidates, and ranked using Cohere's reranker.
-						</p>
-					</div>
-				</div>
-			</div>
-		</div>
-	</section>
-
-	<!-- CTA Section -->
-	<section class="px-6 py-20 bg-blue-600 dark:bg-blue-800">
+	<!-- Footer -->
+	<footer class="px-6 py-8 border-t border-slate-800">
 		<div class="max-w-4xl mx-auto text-center">
-			<h2 class="text-4xl font-bold text-white mb-6">
-				Ready to Get Started?
-			</h2>
-			<p class="text-xl text-blue-100 mb-8">
-				Start chatting with the Taleo API assistant and explore the power of RAG-based recruitment.
+			<p class="text-sm text-slate-500">
+				Arvaya AI & Automations Consulting
 			</p>
-			<button
-				onclick={() => goto('/spectra-job')}
-				class="px-8 py-4 bg-white text-blue-600 rounded-lg font-semibold text-lg
-				       hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-blue-600
-				       transition-colors shadow-lg hover:shadow-xl"
-			>
-				Launch RAG Agent
-			</button>
 		</div>
-	</section>
+	</footer>
 </div>

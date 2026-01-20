@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { signOut } from '@auth/sveltekit/client';
+	import ArvayaLogo from '$lib/assets/ArvayaLogo.png';
 
 	interface Props {
 		isOpen?: boolean;
@@ -11,11 +12,16 @@
 
 	let { isOpen = $bindable(true), session }: Props = $props();
 
-	const navItems = [
-		{ href: '/', label: 'Home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
-		{ href: '/spectra-job', label: 'Spectra Project Assistant', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
-		{ href: '/appointments', label: 'Appointments', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
-		{ href: '/billi', label: 'Billi', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
+	// Main navigation
+	const mainNavItems = [
+		{ href: '/moe', label: 'Billi', description: 'AI Assistant', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', primary: true },
+		{ href: '/spectra-job', label: 'Spectra RAG', description: 'Recruitment Search', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
+	];
+
+	// Legacy tools section
+	const legacyNavItems = [
+		{ href: '/appointments', label: 'Calendar', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+		{ href: '/billi', label: 'Time Entry', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
 	];
 
 	function isActive(href: string): boolean {
@@ -24,7 +30,6 @@
 
 	function handleNavigate(href: string) {
 		goto(href);
-		// Close sidebar on mobile after navigation
 		if (typeof window !== 'undefined' && window.innerWidth < 1024) {
 			isOpen = false;
 		}
@@ -36,7 +41,7 @@
 	<div
 		role="button"
 		tabindex="0"
-		class="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden transition-opacity"
+		class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden transition-opacity"
 		onclick={() => (isOpen = false)}
 		onkeydown={(e) => {
 			if (e.key === 'Enter' || e.key === ' ') {
@@ -49,88 +54,121 @@
 
 <!-- Sidebar -->
 <aside
-	class="fixed top-0 left-0 h-full w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 
-	       transform transition-transform duration-300 ease-in-out z-50
+	class="fixed top-0 left-0 h-full w-72 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800
+	       shadow-2xl transform transition-transform duration-300 ease-in-out z-50
 	       {isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0"
 >
 	<div class="flex flex-col h-full">
-		<!-- Sidebar Header -->
-		<div class="p-6 border-b border-gray-200 dark:border-gray-800">
+		<!-- Header with Logo -->
+		<div class="p-6 border-b border-slate-700/50">
 			<div class="flex items-center justify-between">
-				<h2 class="text-xl font-bold text-gray-900 dark:text-white">Arvaya AI & Automations Consulting</h2>
+				<div class="flex items-center gap-3">
+					<img src={ArvayaLogo} alt="Arvaya" class="h-10 w-auto" />
+				</div>
 				<button
 					onclick={() => (isOpen = false)}
-					class="lg:hidden text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+					class="lg:hidden p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-colors"
 					aria-label="Close sidebar"
 				>
-					<svg
-						class="w-6 h-6"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M6 18L18 6M6 6l12 12"
-						></path>
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
 					</svg>
 				</button>
 			</div>
-			<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Zaki Dev Portal</p>
+			<div class="mt-3">
+				<p class="text-xs font-semibold text-amber-500 uppercase tracking-wider">Developer Portal</p>
+			</div>
 		</div>
 
-		<!-- Navigation -->
-		<nav class="flex-1 overflow-y-auto p-4">
-			<ul class="space-y-2">
-				{#each navItems as item}
-					<li>
-						<button
-							onclick={() => handleNavigate(item.href)}
-							class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors
-							       {isActive(item.href)
-									? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium'
-									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
-						>
-							<svg
-								class="w-5 h-5"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
+		<!-- Main Navigation -->
+		<nav class="flex-1 overflow-y-auto px-4 py-6">
+			<!-- AI Tools Section -->
+			<div class="mb-8">
+				<p class="px-3 mb-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">AI Tools</p>
+				<ul class="space-y-1">
+					{#each mainNavItems as item}
+						<li>
+							<button
+								onclick={() => handleNavigate(item.href)}
+								class="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all duration-200
+								       {isActive(item.href)
+										? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 shadow-lg shadow-amber-500/10 border border-amber-500/20'
+										: item.primary
+											? 'text-slate-200 hover:bg-slate-700/50 hover:text-amber-400'
+											: 'text-slate-300 hover:bg-slate-700/50 hover:text-white'}"
 							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d={item.icon}
-								></path>
-							</svg>
-							<span>{item.label}</span>
-						</button>
-					</li>
-				{/each}
-			</ul>
+								<div class="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center
+								            {isActive(item.href)
+											? 'bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-amber-500/30'
+											: item.primary
+												? 'bg-gradient-to-br from-amber-500/20 to-orange-600/20 text-amber-400'
+												: 'bg-slate-700/50 text-slate-400'}">
+									<svg class="w-5 h-5 {isActive(item.href) ? 'text-white' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={item.icon}></path>
+									</svg>
+								</div>
+								<div>
+									<p class="font-medium">{item.label}</p>
+									{#if item.description}
+										<p class="text-xs {isActive(item.href) ? 'text-amber-400/70' : 'text-slate-500'}">{item.description}</p>
+									{/if}
+								</div>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			</div>
+
+			<!-- Legacy Tools Section -->
+			<div>
+				<p class="px-3 mb-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Individual Tools</p>
+				<ul class="space-y-1">
+					{#each legacyNavItems as item}
+						<li>
+							<button
+								onclick={() => handleNavigate(item.href)}
+								class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-200
+								       {isActive(item.href)
+										? 'bg-slate-700/70 text-white'
+										: 'text-slate-400 hover:bg-slate-700/30 hover:text-slate-200'}"
+							>
+								<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={item.icon}></path>
+								</svg>
+								<span class="text-sm">{item.label}</span>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			</div>
 		</nav>
 
-		<!-- Footer -->
-		<div class="p-4 border-t border-gray-200 dark:border-gray-800">
+		<!-- User Section -->
+		<div class="p-4 border-t border-slate-700/50 bg-slate-800/50">
 			{#if session?.user}
-				<div class="mb-3">
-					<p class="text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">
-						{session.user.name || session.user.email}
-					</p>
-					<button
-						onclick={() => signOut()}
-						class="w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-					>
-						Sign Out
-					</button>
+				<div class="flex items-center gap-3 mb-3">
+					<div class="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white font-semibold shadow-lg shadow-amber-500/20">
+						{(session.user.name || session.user.email || 'U').charAt(0).toUpperCase()}
+					</div>
+					<div class="flex-1 min-w-0">
+						<p class="text-sm font-medium text-white truncate">
+							{session.user.name || 'User'}
+						</p>
+						<p class="text-xs text-slate-400 truncate">
+							{session.user.email || ''}
+						</p>
+					</div>
 				</div>
+				<button
+					onclick={() => signOut()}
+					class="w-full px-4 py-2 text-sm text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all duration-200 flex items-center justify-center gap-2"
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+					</svg>
+					Sign Out
+				</button>
 			{/if}
-			<p class="text-xs text-gray-500 dark:text-gray-400 text-center">
-				© 2026 Arvaya AI & Automations Consulting 
-			</p>
 		</div>
 	</div>
 </aside>
