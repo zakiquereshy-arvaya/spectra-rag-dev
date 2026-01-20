@@ -184,7 +184,6 @@ export class CohereService {
 						console.log('[Cohere Stream] Tool call start:', currentToolCall.name);
 					}
 				} else if (event.type === 'tool-call-delta') {
-					// Tool call argument chunk
 					const delta = event.delta as any;
 					if (currentToolCall && delta?.message?.toolCalls?.function?.arguments) {
 						currentToolCall.arguments += delta.message.toolCalls.function.arguments;
@@ -226,6 +225,137 @@ export class CohereService {
 				error: error.message || 'Streaming error',
 			};
 		}
+	}
+
+	/**
+	 * Create tool definitions for time entry/billing operations
+	 * Used by the billing expert in MoE
+	 */
+	static createTimeEntryTools(): ToolV2[] {
+		return [
+			{
+				type: 'function',
+				function: {
+					name: 'lookup_employee',
+					description:
+						'Look up an employee by name to get their QuickBooks ID. Use this before submitting time entries. Supports fuzzy matching.',
+					parameters: {
+						type: 'object',
+						properties: {
+							name: {
+								type: 'string',
+								description: 'The employee name to look up (partial matches supported)',
+							},
+						},
+						required: ['name'],
+					},
+				},
+			},
+			{
+				type: 'function',
+				function: {
+					name: 'lookup_customer',
+					description:
+						'Look up a customer/client by name to get their QuickBooks ID. Aliases like "ICE" for "Infrastructure Consulting & Engineering" are supported. Use this before submitting time entries.',
+					parameters: {
+						type: 'object',
+						properties: {
+							name: {
+								type: 'string',
+								description: 'The customer/client name to look up (partial matches and aliases supported)',
+							},
+						},
+						required: ['name'],
+					},
+				},
+			},
+			{
+				type: 'function',
+				function: {
+					name: 'list_employees',
+					description:
+						'Get a list of all employees with their names and QuickBooks IDs. Use this when the employee name is ambiguous or to see all available employees.',
+					parameters: {
+						type: 'object',
+						properties: {},
+						required: [],
+					},
+				},
+			},
+			{
+				type: 'function',
+				function: {
+					name: 'list_customers',
+					description:
+						'Get a list of all customers/clients with their names and QuickBooks IDs. Use this when the customer name is ambiguous or to see all available customers.',
+					parameters: {
+						type: 'object',
+						properties: {},
+						required: [],
+					},
+				},
+			},
+			{
+				type: 'function',
+				function: {
+					name: 'submit_time_entry',
+					description:
+						'Submit a time entry to QuickBooks and Monday.com. IMPORTANT: You must first use lookup_employee and lookup_customer to get the QBO IDs before submitting. All required fields must be filled.',
+					parameters: {
+						type: 'object',
+						properties: {
+							employee_name: {
+								type: 'string',
+								description: 'The display name of the employee',
+							},
+							employee_qbo_id: {
+								type: 'string',
+								description: 'The QuickBooks Online ID of the employee (from lookup_employee)',
+							},
+							customer_name: {
+								type: 'string',
+								description: 'The display name of the customer/client',
+							},
+							customer_qbo_id: {
+								type: 'string',
+								description: 'The QuickBooks Online ID of the customer (from lookup_customer)',
+							},
+							tasks_completed: {
+								type: 'string',
+								description: 'Description of the work/tasks completed',
+							},
+							hours: {
+								type: 'number',
+								description: 'Number of hours worked (decimal allowed, e.g., 1.5 for 1 hour 30 minutes)',
+							},
+							billable: {
+								type: 'boolean',
+								description: 'Whether the time is billable (default: true)',
+							},
+							entry_date: {
+								type: 'string',
+								description: 'Date of the time entry in YYYY-MM-DD format. Defaults to today if not provided.',
+							},
+						},
+						required: [
+							'employee_name',
+							'employee_qbo_id',
+							'customer_name',
+							'customer_qbo_id',
+							'tasks_completed',
+							'hours',
+						],
+					},
+				},
+			},
+		];
+	}
+
+	/**
+	 * Create all tools (calendar + time entry) for unified expert
+	 */
+	static createAllTools(): ToolV2[] {
+		return [...this.createCalendarTools(), ...this.createTimeEntryTools()];
 	}
 
 	/**
