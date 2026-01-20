@@ -32,17 +32,20 @@ export class MoEClassifier {
 		const systemPrompt = `You are an intent classifier for Arvaya AI & Automations. Your job is to categorize user messages into one of three categories.
 
 Categories:
-- "appointments": Calendar, meetings, scheduling, availability checks, booking rooms, finding free time slots, Microsoft Calendar operations
-- "billing": Time entries, logging hours, work tracking, QuickBooks, invoicing, customers/clients for billing, recording tasks completed
+- "appointments": Calendar, meetings, scheduling, availability checks, booking rooms, finding free time slots, Microsoft Calendar operations. IMPORTANT: Only classify as "appointments" if the user wants to SCHEDULE or BOOK a meeting. If "meeting" appears in a task description for time logging, it's "billing".
+- "billing": Time entries, logging hours, work tracking, QuickBooks, invoicing, customers/clients for billing, recording tasks completed. This includes messages like "log X hours for customer, tasks: did Y before meeting" - the word "meeting" here is part of the task description, not a request to book a meeting.
 - "general": Greetings, questions about capabilities, unclear intent, mixed requests, or anything that doesn't clearly fit appointments or billing
 
+CRITICAL RULE: If a message contains time entry indicators (customer, hours, tasks, description, "log", "record", "submit") AND mentions "meeting", prioritize "billing" unless the message explicitly asks to schedule/book a meeting.
+
 Instructions:
-1. Analyze the message carefully
+1. Analyze the message carefully - look for PRIMARY intent
 2. Consider context from chat history if provided
-3. Assign a confidence score (0.0 to 1.0) based on how certain you are
-4. High confidence (0.8+): Clear, unambiguous intent
-5. Medium confidence (0.5-0.8): Likely intent but some ambiguity
-6. Low confidence (<0.5): Unclear or could be multiple categories
+3. If message mentions "meeting" but also has time entry keywords (customer, hours, tasks, log, record), classify as "billing"
+4. Assign a confidence score (0.0 to 1.0) based on how certain you are
+5. High confidence (0.8+): Clear, unambiguous intent
+6. Medium confidence (0.5-0.8): Likely intent but some ambiguity
+7. Low confidence (<0.5): Unclear or could be multiple categories
 
 Return ONLY valid JSON in this format:
 {
@@ -172,28 +175,62 @@ Return ONLY the JSON classification.`;
 	/**
 	 * Quick classification for simple pattern matching
 	 * Use this as a first-pass before LLM classification for obvious cases
+	 * IMPORTANT: Check billing patterns FIRST when time entry indicators are present,
+	 * to avoid false positives from "meeting" appearing in task descriptions
 	 */
 	quickClassify(message: string): ClassificationResult | null {
 		const lower = message.toLowerCase();
 
-		// High-confidence appointment patterns
-		const appointmentPatterns = [
-			/\b(book|schedule|meeting|calendar|appointment|available|free\s+(time|slot))\b/,
-			/\bcheck\s+(my\s+)?availability\b/,
-			/\bwhat('s|\s+is)\s+.*\s+schedule\b/,
-		];
-
-		// High-confidence billing patterns
+		// High-confidence billing patterns - CHECK THESE FIRST
+		// This prevents "meeting" in task descriptions from triggering appointment classification
 		const billingPatterns = [
 			/\b(log|record|submit)\s+.*\s*(hours?|time)\b/,
 			/\b\d+(\.\d+)?\s*(hours?|hrs?)\s+(for|on)\b/,
 			/\btime\s+entry\b/,
 			/\bbillable\b/,
 			/\bquickbooks\b/i,
+			// Patterns that indicate time logging context
+			/\b(customer|client|hours|tasks?|description|worked\s+on)\b.*\b(log|record|submit|entry)\b/i,
+			/\b(log|record|submit|entry).*\b(customer|client|hours|tasks?|description)\b/i,
+		];
+
+		// Check billing patterns FIRST when there are clear time entry indicators
+		// This handles cases like "log time for arvaya, tasks: testing before meeting"
+		const hasTimeEntryIndicators = 
+			/\b(log|record|submit|entry)\b/i.test(lower) ||
+			/\b\d+(\.\d+)?\s*(hours?|hrs?)\b/.test(lower) ||
+			/\b(customer|client|tasks?|description|worked)\b/i.test(lower);
+
+		if (hasTimeEntryIndicators) {
+			for (const pattern of billingPatterns) {
+				if (pattern.test(lower)) {
+					return {
+						category: 'billing',
+						confidence: 0.95,
+						reasoning: 'Pattern match: billing-related keywords with time entry context',
+					};
+				}
+			}
+		}
+
+		// High-confidence appointment patterns
+		// Only match "meeting" when it's clearly about scheduling, not in task descriptions
+		const appointmentPatterns = [
+			/\b(book|schedule)\s+(a\s+)?(meeting|appointment)\b/,
+			/\b(book|schedule)\s+.*\s+(meeting|appointment)\b/,
+			/\bcheck\s+(my\s+)?availability\b/,
+			/\bwhat('s|\s+is)\s+.*\s+schedule\b/,
+			/\b(calendar|appointment|available|free\s+(time|slot))\b/,
+			// Only match "meeting" if it's clearly about scheduling, not in task descriptions
+			/\b(create|set\s+up|arrange)\s+(a\s+)?meeting\b/,
 		];
 
 		for (const pattern of appointmentPatterns) {
 			if (pattern.test(lower)) {
+				// Double-check: if this looks like a time entry request, don't classify as appointment
+				if (hasTimeEntryIndicators) {
+					continue; // Skip appointment classification if time entry indicators present
+				}
 				return {
 					category: 'appointments',
 					confidence: 0.9,
@@ -202,13 +239,16 @@ Return ONLY the JSON classification.`;
 			}
 		}
 
-		for (const pattern of billingPatterns) {
-			if (pattern.test(lower)) {
-				return {
-					category: 'billing',
-					confidence: 0.9,
-					reasoning: 'Pattern match: billing-related keywords',
-				};
+		// Check billing patterns again if no appointment match (for cases without strong time entry indicators)
+		if (!hasTimeEntryIndicators) {
+			for (const pattern of billingPatterns) {
+				if (pattern.test(lower)) {
+					return {
+						category: 'billing',
+						confidence: 0.9,
+						reasoning: 'Pattern match: billing-related keywords',
+					};
+				}
 			}
 		}
 
