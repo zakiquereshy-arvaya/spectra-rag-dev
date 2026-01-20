@@ -29,15 +29,14 @@
 
 I can help you with:
 
+**Time Tracking**
+- Log time for projects (e.g., "Log 2 hours for ICE - worked on migration")
+
 **Calendar & Scheduling**
 - Check availability for team members
 - Book meetings with Teams links
 
-**Time Tracking**
-- Log time entries to QuickBooks
-- Look up employees and customers
-
-Just ask me what you need!`,
+Just tell me what you need!`,
 		timestamp: new Date().toISOString(),
 	};
 
