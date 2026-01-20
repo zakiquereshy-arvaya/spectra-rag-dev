@@ -504,33 +504,50 @@ export class UnifiedMCPServer {
 - For time entries: use logged-in user as employee, treat company names as customers`,
 			};
 
-			// IMPORTANT: Buffer ALL initial response - don't yield text until we know if there are tool calls
-			let fullText = '';
-			const toolCalls: any[] = [];
-
-			// First, collect the ENTIRE response (text + tool calls) without yielding
-			for await (const chunk of this.cohereService.chatStream(
-				userMessage,
-				tools,
-				[systemMessage, ...preparedHistory],
-				undefined
-			)) {
-				if (chunk.type === 'text' && chunk.content) {
-					fullText += chunk.content;
-					// DON'T yield text here - buffer it
-				} else if (chunk.type === 'tool_call' && chunk.toolCall) {
-					toolCalls.push(chunk.toolCall);
-				} else if (chunk.type === 'error') {
-					yield '\n\n[Error: ' + chunk.error + ']';
-					return;
-				}
-			}
-
+			// Add user message to history
 			this.pushToHistory({ role: 'user', content: userMessage });
 
-			if (toolCalls.length > 0) {
-				// Tool calls present - DON'T show the buffered text, just process tools silently
+			// AGENTIC LOOP - keep executing tools until done (max 5 iterations)
+			const MAX_ITERATIONS = 5;
+			let iteration = 0;
+			let timeEntryActuallySubmitted = false;
+			let timeEntryError: string | null = null;
+			let currentMessage = userMessage;
 
+			while (iteration < MAX_ITERATIONS) {
+				iteration++;
+				console.log(`[UnifiedMCP] Agentic loop iteration ${iteration}`);
+
+				const preparedHistory = prepareChatHistory(this.chatHistory);
+				let fullText = '';
+				const toolCalls: any[] = [];
+
+				// Call Cohere and collect response WITHOUT yielding text
+				for await (const chunk of this.cohereService.chatStream(
+					currentMessage,
+					tools,
+					[systemMessage, ...preparedHistory],
+					undefined
+				)) {
+					if (chunk.type === 'text' && chunk.content) {
+						fullText += chunk.content;
+					} else if (chunk.type === 'tool_call' && chunk.toolCall) {
+						toolCalls.push(chunk.toolCall);
+					} else if (chunk.type === 'error') {
+						yield '\n\n[Error: ' + chunk.error + ']';
+						return;
+					}
+				}
+
+				// No tool calls = done, yield final response
+				if (toolCalls.length === 0) {
+					const responseText = fullText || 'How can I help you today?';
+					yield responseText;
+					this.pushToHistory({ role: 'assistant', content: responseText });
+					break;
+				}
+
+				// Tool calls present - execute them silently
 				const assistantMessage: ChatMessageV2 = { role: 'assistant' };
 				if (fullText) assistantMessage.content = fullText;
 				assistantMessage.toolCalls = toolCalls.map((tc) => ({
@@ -538,23 +555,15 @@ export class UnifiedMCPServer {
 					type: 'function' as const,
 					function: { name: tc.name, arguments: JSON.stringify(tc.parameters) },
 				}));
-				if (!assistantMessage.content && !assistantMessage.toolCalls) {
-					assistantMessage.content = 'Processing...';
-				}
 				this.pushToHistory(assistantMessage);
 
+				// Execute tools
 				const toolResults: ChatMessageV2[] = [];
-				const executedTools: string[] = [];
-				let timeEntryActuallySubmitted = false;
-				let timeEntryError: string | null = null;
-
 				for (const toolCall of toolCalls) {
 					try {
 						console.log(`[UnifiedMCP] Executing tool: ${toolCall.name}`);
 						const result = await this.callTool(toolCall.name, toolCall.parameters);
-						executedTools.push(toolCall.name);
 
-						// Track if time entry was ACTUALLY submitted
 						if (toolCall.name === 'submit_time_entry' && result.success === true) {
 							timeEntryActuallySubmitted = true;
 							console.log(`[UnifiedMCP] TIME ENTRY SUBMITTED SUCCESSFULLY`);
@@ -575,45 +584,18 @@ export class UnifiedMCPServer {
 
 				this.pushToHistory(...toolResults);
 
-				const preparedHistoryForFinal = prepareChatHistory(this.chatHistory);
-				let finalFullText = '';
-
-				// Build final prompt based on what ACTUALLY happened
-				let finalPrompt: string;
-				const hasTimeEntryCall = toolCalls.some(tc => tc.name === 'submit_time_entry');
-
-				if (hasTimeEntryCall) {
-					if (timeEntryActuallySubmitted) {
-						finalPrompt = `The time entry was SUCCESSFULLY submitted. Based on the tool results, confirm this to the user. Show employee name, customer name, hours, and description. NEVER show QBO IDs.`;
-					} else if (timeEntryError) {
-						finalPrompt = `The time entry FAILED with error: "${timeEntryError}". Tell the user it failed and explain the error. Do NOT claim success.`;
-					} else {
-						finalPrompt = `Report the actual tool results to the user. Only claim success if the tool result shows success:true.`;
-					}
-				} else if (executedTools.length > 0) {
-					finalPrompt = `Based on the tool results, provide a clear and helpful response. If lookups returned suggestions, automatically use the best match - do NOT ask for confirmation.`;
+				// Set next iteration prompt - tell AI to continue or report results
+				if (timeEntryActuallySubmitted) {
+					currentMessage = 'Time entry was submitted successfully. Confirm to user with details (no QBO IDs).';
+				} else if (timeEntryError) {
+					currentMessage = `Time entry failed: ${timeEntryError}. Report this error to user.`;
 				} else {
-					finalPrompt = `No tools were executed. Ask the user for more information to proceed.`;
+					currentMessage = 'Continue with the task. If you have all the information needed, call submit_time_entry. If lookups succeeded, use those results.';
 				}
+			}
 
-				for await (const chunk of this.cohereService.chatStream(
-					finalPrompt,
-					tools,
-					[systemMessage, ...preparedHistoryForFinal],
-					'NONE'
-				)) {
-					if (chunk.type === 'text' && chunk.content) {
-						finalFullText += chunk.content;
-						yield chunk.content;
-					}
-				}
-
-				this.pushToHistory({ role: 'assistant', content: finalFullText || 'Request processed.' });
-			} else {
-				// No tool calls - yield the buffered text to the user
-				const responseText = fullText || 'How can I help you today?';
-				yield responseText;
-				this.pushToHistory({ role: 'assistant', content: responseText });
+			if (iteration >= MAX_ITERATIONS) {
+				yield 'I was unable to complete the request after multiple attempts. Please try again with more specific information.';
 			}
 
 			await this.saveHistory();
