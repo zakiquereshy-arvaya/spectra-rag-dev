@@ -53,17 +53,28 @@ export async function getEmployeeByName(name: string): Promise<Employee | null> 
 	return result.rows[0] || null;
 }
 
+// Customer name aliases for common shortcuts
+const CUSTOMER_ALIASES: Record<string, string> = {
+	'ice': 'Infrastructure Consulting & Engineering',
+	'arvaya': 'Arvaya',
+};
+
 /**
- * Fuzzy match customer by name
+ * Fuzzy match customer by name (supports aliases like ICE → Infrastructure Consulting & Engineering)
  */
 export async function getCustomerByName(name: string): Promise<Customer | null> {
 	const client = getAZeroClient();
+
+	// Check for alias first
+	const lowerName = name.toLowerCase().trim();
+	const resolvedName = CUSTOMER_ALIASES[lowerName] || name;
+
 	const result = await client.query(
 		`SELECT id, name, qbo_id
      FROM prod_customers
      WHERE LOWER(name) LIKE LOWER($1)
      LIMIT 1`,
-		[`%${name}%`]
+		[`%${resolvedName}%`]
 	);
 	return result.rows[0] || null;
 }
