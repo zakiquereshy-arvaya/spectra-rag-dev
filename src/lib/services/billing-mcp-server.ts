@@ -371,11 +371,12 @@ export class BillingMCPServer {
 					}
 
 					// REJECT FAKE/PLACEHOLDER IDs - must be real from database lookups
+					// Note: QBO IDs can be single digits (e.g., "3" for Arvaya Administrative), so we only check patterns
 					const fakeIdPatterns = /^(EMP|CUST|ID|QBO|TEST|PLACEHOLDER|XXX|000)/i;
-					if (fakeIdPatterns.test(employee_qbo_id) || employee_qbo_id.length < 3) {
+					if (fakeIdPatterns.test(String(employee_qbo_id))) {
 						throw new Error(`INVALID employee_qbo_id "${employee_qbo_id}". Call lookup_employee("${employee_name}") to get the real ID.`);
 					}
-					if (fakeIdPatterns.test(customer_qbo_id) || customer_qbo_id.length < 3) {
+					if (fakeIdPatterns.test(String(customer_qbo_id))) {
 						throw new Error(`INVALID customer_qbo_id "${customer_qbo_id}". Call lookup_customer("${customer_name}") to get the real ID.`);
 					}
 
@@ -574,8 +575,9 @@ export class BillingMCPServer {
 				}
 
 				// Tool calls present - execute them silently
+				// Note: Cohere API doesn't allow both content and toolCalls in the same message
 				const assistantMessage: ChatMessageV2 = { role: 'assistant' };
-				if (fullText) assistantMessage.content = fullText;
+				// Don't set content when toolCalls are present - Cohere API constraint
 				assistantMessage.toolCalls = toolCalls.map((tc) => ({
 					id: tc.id,
 					type: 'function' as const,
