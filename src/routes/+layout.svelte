@@ -15,7 +15,7 @@
 	<Sidebar bind:isOpen={sidebarOpen} session={data.session} />
 	
 	<!-- Main Content -->
-	<main class="flex-1 lg:ml-64">
+	<main class="flex-1 lg:ml-72">
 		<!-- Mobile menu button -->
 		<button
 			onclick={() => (sidebarOpen = true)}
