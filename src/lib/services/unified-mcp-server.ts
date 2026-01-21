@@ -681,6 +681,22 @@ export class UnifiedMCPServer {
 4. You MUST call submit_time_entry with ALL required fields (employee_name, employee_qbo_id, customer_name, customer_qbo_id, tasks_completed, hours, entry_date)
 5. ONLY AFTER submit_time_entry returns success=true, you confirm: "Logged 2 hours for Infrastructure Consulting & Engineering"
 
+**MULTI-TASK TIME ENTRIES:**
+When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. ICE - Task B - 1 hour"):
+1. Parse ALL entries in the message
+2. If SAME customer: Aggregate into ONE submit_time_entry with summed hours and combined tasks
+   - Example: customer=ICE, hours=2, tasks="Task A, Task B"
+3. If DIFFERENT customers: Call submit_time_entry MULTIPLE times (one per customer)
+   - Each customer needs its own lookup_customer call
+   - Call submit_time_entry separately for each customer
+
+**Multi-entry patterns to recognize:**
+- Period-separated: "Customer - Task - X hours. Customer - Task - Y hours"
+- Comma-separated: "Customer: Task A (2 hrs), Task B (1 hr)"
+- Dash-separated: "Customer - Task A - 1 hour - Task B - 1 hour"
+- Natural language: "2 hours for ICE on API work and 1 hour for Arvaya on docs"
+- Line breaks or bullet points
+
 **CRITICAL RULES:**
 - NEVER claim to have logged time without actually calling submit_time_entry
 - NEVER say "Logged X hours" unless submit_time_entry tool was called and returned success=true
