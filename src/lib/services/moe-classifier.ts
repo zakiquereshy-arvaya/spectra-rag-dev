@@ -187,6 +187,7 @@ Return ONLY the JSON classification.`;
 			/\b(log|record|submit)\s+.*\s*(hours?|time)\b/,
 			/\b\d+(\.\d+)?\s*(hours?|hrs?)\s+(for|on)\b/,
 			/\btime\s+entry\b/,
+			/\btime\s+log\s+ some time \+ time\b/,
 			/\bbillable\b/,
 			/\bquickbooks\b/i,
 			// Patterns that indicate time logging context
