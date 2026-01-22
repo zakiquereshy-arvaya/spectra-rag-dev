@@ -9,6 +9,7 @@ const SESSION_KEYS = {
 	billi: 'session-billi-id',
 	spectraJob: 'session-spectra-job-id',
 	moe: 'session-moe-id',
+	fireflies: 'session-fireflies-id',
 } as const;
 
 export type ChatKey = keyof typeof SESSION_KEYS;
@@ -70,7 +71,9 @@ export async function fetchChatHistory(
 					? '/spectra-job/history'
 					: chatKey === 'moe'
 						? '/moe/history'
-						: '/billi/history';
+						: chatKey === 'fireflies'
+							? '/fireflies/history'
+							: '/billi/history';
 
 		const response = await fetch(`${endpoint}?sessionId=${encodeURIComponent(sessionId)}`);
 
@@ -103,7 +106,9 @@ export async function clearServerHistory(chatKey: ChatKey, sessionId: string): P
 					? '/spectra-job/history'
 					: chatKey === 'moe'
 						? '/moe/history'
-						: '/billi/history';
+						: chatKey === 'fireflies'
+							? '/fireflies/history'
+							: '/billi/history';
 
 		const response = await fetch(`${endpoint}?sessionId=${encodeURIComponent(sessionId)}`, {
 			method: 'DELETE',

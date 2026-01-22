@@ -11,7 +11,11 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
-		"lint": "prettier --check . && eslint ."
+		"lint": "prettier --check . && eslint .",
+		"migrate-vector-db": "bun run src/lib/scripts/migrate-vector-db.ts",
+		"import-fireflies": "bun run src/lib/scripts/import-fireflies.ts",
+		"index-documents": "bun run src/lib/scripts/index-documents.ts",
+		"index-fireflies-rag": "bun run src/lib/scripts/index-fireflies-to-rag.ts"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.4.0",
