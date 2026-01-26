@@ -244,7 +244,7 @@ export class UnifiedMCPServer {
 
 	private detectAvailabilityIntent(message: string): { name: string; date: string } | null {
 		const lower = message.toLowerCase();
-		const availabilityKeywords = /availability|available|free|open|schedule|booking|book|meet(?:ing)?/i;
+		const availabilityKeywords = /\b(availability|available|free|schedule|booking|book|meet(?:ing)?)\b/i;
 		if (!availabilityKeywords.test(lower)) return null;
 
 		const name = this.extractAvailabilityName(message);

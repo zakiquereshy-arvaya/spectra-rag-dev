@@ -190,7 +190,7 @@ Return ONLY the JSON classification.`;
 			/\b\d+(\.\d+)?\s*(hours?|hrs?)\b/.test(lower) ||
 			/\b(customer|client|tasks?|description|worked)\b/i.test(lower);
 
-		const schedulingIndicators = /availability|available|free|open|schedule|booking|book|calendar/;
+		const schedulingIndicators = /\b(availability|available|free|schedule|booking|book|calendar)\b/;
 		const hasSchedulingIndicators = schedulingIndicators.test(lower);
 
 		if (hasTimeEntryIndicators && hasSchedulingIndicators) {
