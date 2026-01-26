@@ -147,7 +147,15 @@ export class MoERouter {
 
 		// Step 1: Classify the message
 		const classification = await this.classifyMessage(message);
-		if (classification.reasoning === 'mixed_intent') {
+		const lower = message.toLowerCase();
+		const hasTimeEntryIndicators =
+			/\b(log|record|submit|entry)\b/i.test(lower) ||
+			/\b\d+(\.\d+)?\s*(hours?|hrs?)\b/.test(lower) ||
+			/\b(customer|client|tasks?|description|worked)\b/i.test(lower);
+		const hasSchedulingIndicators =
+			/\b(availability|available|free|schedule|booking|book|calendar)\b/i.test(lower);
+
+		if (classification.reasoning === 'mixed_intent' && hasTimeEntryIndicators && hasSchedulingIndicators) {
 			yield 'I can help with either calendar scheduling or time entry in a single request. Which would you like to do first?';
 			return;
 		}
