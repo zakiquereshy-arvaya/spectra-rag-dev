@@ -121,12 +121,14 @@ export class MoERouter {
 	 * Determine which expert to use based on classification
 	 */
 	private determineExpert(classification: ClassificationResult): 'appointments' | 'billing' | 'unified' {
-		if (classification.confidence >= CONFIDENCE_THRESHOLD) {
-			if (classification.category === 'appointments') {
-				return 'appointments';
-			} else if (classification.category === 'billing') {
-				return 'billing';
-			}
+		if (classification.category === 'appointments') {
+			return 'appointments';
+		}
+		if (classification.category === 'billing') {
+			return 'billing';
+		}
+		if (classification.confidence >= CONFIDENCE_THRESHOLD && classification.category === 'general') {
+			return 'unified';
 		}
 		// Low confidence or general category -> unified expert
 		return 'unified';
@@ -145,6 +147,10 @@ export class MoERouter {
 
 		// Step 1: Classify the message
 		const classification = await this.classifyMessage(message);
+		if (classification.reasoning === 'mixed_intent') {
+			yield 'I can help with either calendar scheduling or time entry in a single request. Which would you like to do first?';
+			return;
+		}
 
 		// Step 2: Determine which expert to use
 		const expertType = this.determineExpert(classification);

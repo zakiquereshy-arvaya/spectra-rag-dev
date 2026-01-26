@@ -268,7 +268,7 @@ export class MCPServer {
 			},
 			{
 				name: 'check_availability',
-				description: 'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day. Supports natural language dates like "next monday", "tomorrow", "1/12/2026", or YYYY-MM-DD format.',
+				description: 'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day. Free slots are derived from Microsoft Graph schedule data (getSchedule/freeBusy). Supports natural language dates like "next monday", "tomorrow", "1/12/2026", or YYYY-MM-DD format.',
 				inputSchema: {
 					type: 'object',
 					properties: {
@@ -279,6 +279,28 @@ export class MCPServer {
 						date: {
 							type: 'string',
 							description: 'The date to check. Supports natural language like "next monday", "tomorrow", "this friday", or date formats like "1/12/2026" or "2026-01-12". Defaults to today if not provided.',
+						},
+					},
+					required: ['user_email'],
+				},
+			},
+			{
+				name: 'get_free_slots',
+				description: 'Get free time slots for a user on a specific date using Microsoft Graph schedule data. Returns available slots for the day. Supports natural language dates like "next monday", "tomorrow", "1/12/2026", or YYYY-MM-DD format.',
+				inputSchema: {
+					type: 'object',
+					properties: {
+						user_email: {
+							type: 'string',
+							description: 'The email address or display name of the user to check. If a name is provided, it will be matched against users from get_users_with_name_and_email.',
+						},
+						date: {
+							type: 'string',
+							description: 'The date to check. Defaults to today if not provided.',
+						},
+						duration_minutes: {
+							type: 'number',
+							description: 'Optional slot size in minutes (default: 30).',
 						},
 					},
 					required: ['user_email'],
@@ -345,6 +367,10 @@ export class MCPServer {
 				case 'check_availability': {
 					let userEmail = args.user_email;
 					let date = args.date;
+					const durationMinutes =
+						typeof args.duration_minutes === 'number' && args.duration_minutes > 0
+							? Math.round(args.duration_minutes)
+							: 30;
 
 					if (!userEmail.includes('@')) {
 					if (!this.aiHelper) {
@@ -373,6 +399,7 @@ export class MCPServer {
 					
 					// Parse natural language date (handles "next monday", "tomorrow", etc.)
 					const parsedDate = this.parseDate(date);
+					this.lastAvailabilityDate = parsedDate;
 					
 					// Create datetime range for the full day in EST/EDT timezone
 					// Convert local midnight to UTC for the query
@@ -405,7 +432,26 @@ export class MCPServer {
 							};
 						});
 
-					const freeSlots = this.calculateFreeSlots(busyTimes, parsedDate);
+					const availableSlots = await this.graphService.getAvailableSlotsForUser(
+						userEmail,
+						`${parsedDate}T09:00:00`,
+						`${parsedDate}T17:00:00`,
+						durationMinutes,
+						'Eastern Standard Time'
+					);
+
+					const freeSlots = availableSlots.map((slot) => {
+						const startLocal = this.convertToLocalTime(slot.start);
+						const endLocal = this.convertToLocalTime(slot.end);
+						const durationHours =
+							(new Date(slot.end).getTime() - new Date(slot.start).getTime()) /
+							(1000 * 60 * 60);
+						return {
+							start: startLocal,
+							end: endLocal,
+							duration_hours: Math.round(durationHours * 10) / 10,
+						};
+					});
 
 					const displayDate = new Date(parsedDate + 'T00:00:00');
 					const dayOfWeek = displayDate.toLocaleDateString('en-US', { 
@@ -421,6 +467,77 @@ export class MCPServer {
 						total_events: busyTimes.length,
 						free_slots: freeSlots,
 						is_completely_free: busyTimes.length === 0,
+						slot_minutes: durationMinutes,
+						note: 'All times are displayed in Eastern Time (EST/EDT)',
+					};
+				}
+
+				case 'get_free_slots': {
+					let userEmail = args.user_email;
+					const date = args.date;
+					const durationMinutes = typeof args.duration_minutes === 'number' && args.duration_minutes > 0
+						? Math.round(args.duration_minutes)
+						: 30;
+
+					if (!userEmail.includes('@')) {
+						if (!this.aiHelper) {
+							throw new Error(
+								'AI helper not available. Please provide user_email as an email address, ' +
+									'or ensure OpenAI API is configured.'
+							);
+						}
+
+						const usersList = await this.getCachedUsers();
+						const targetUser = await this.aiHelper.matchUserName(userEmail, usersList);
+
+						if (!targetUser) {
+							const availableNames = usersList.slice(0, 5).map((u) => u.name);
+							throw new Error(
+								`User '${userEmail}' not found or ambiguous. ` +
+									`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
+									`Example names found: ${availableNames.join(', ')}`
+							);
+						}
+
+						userEmail = targetUser.email;
+					}
+
+					const parsedDate = this.parseDate(date);
+					const startDateTime = `${parsedDate}T09:00:00`;
+					const endDateTime = `${parsedDate}T17:00:00`;
+					const timeZone = 'Eastern Standard Time';
+
+					const availableSlots = await this.graphService.getAvailableSlotsForUser(
+						userEmail,
+						startDateTime,
+						endDateTime,
+						durationMinutes,
+						timeZone
+					);
+
+					const formattedSlots = availableSlots.map((slot) => {
+						const startLocal = this.convertToLocalTime(slot.start);
+						const endLocal = this.convertToLocalTime(slot.end);
+						const durationHours = (new Date(slot.end).getTime() - new Date(slot.start).getTime()) / (1000 * 60 * 60);
+						return {
+							start: startLocal,
+							end: endLocal,
+							duration_hours: Math.round(durationHours * 10) / 10,
+						};
+					});
+
+					const displayDate = new Date(parsedDate + 'T00:00:00');
+					const dayOfWeek = displayDate.toLocaleDateString('en-US', {
+						weekday: 'long',
+						timeZone: 'America/New_York',
+					});
+
+					return {
+						user_email: userEmail,
+						date: parsedDate,
+						day_of_week: dayOfWeek,
+						free_slots: formattedSlots,
+						slot_minutes: durationMinutes,
 						note: 'All times are displayed in Eastern Time (EST/EDT)',
 					};
 				}
@@ -923,50 +1040,57 @@ export class MCPServer {
 				// Get tools for OpenAI
 				const tools = OpenAIService.createCalendarTools();
 
-				// Call OpenAI with streaming - pass truncated chat history
-				// IMPORTANT: Buffer ALL initial response - don't yield text until we know if there are tool calls
-				const preparedHistory = prepareChatHistory(this.chatHistory);
-				let fullText = '';
-				const toolCalls: any[] = [];
-
-				for await (const chunk of this.openaiService.chatStream(
-					userMessage,
-					tools,
-					preparedHistory,
-					undefined
-				)) {
-					if (chunk.type === 'text' && chunk.content) {
-						fullText += chunk.content;
-						// DON'T yield text here - buffer it until we know if there are tool calls
-					} else if (chunk.type === 'tool_call' && chunk.toolCall) {
-						toolCalls.push(chunk.toolCall);
-					} else if (chunk.type === 'error') {
-						yield '\n\n[Error: ' + chunk.error + ']';
-						return;
-					}
-				}
-
 				// Add user message to history
 				this.pushToHistory({
 					role: 'user',
 					content: userMessage,
 				});
 
-				// Handle tool calls if any
-				if (toolCalls.length > 0) {
-					// Tool calls present - DON'T show the buffered text, just process tools silently
+				const MAX_ITERATIONS = 4;
+				let iteration = 0;
+				let currentMessage = userMessage;
+				let completed = false;
 
-					// Add assistant message with tool_calls to history
-					const assistantMessage: GenericChatMessage = {
-						role: 'assistant',
-					};
+				while (iteration < MAX_ITERATIONS) {
+					iteration++;
 
-					if (fullText) {
-						assistantMessage.content = fullText;
+					// Call OpenAI with streaming - pass truncated chat history
+					// IMPORTANT: Buffer ALL initial response - don't yield text until we know if there are tool calls
+					const preparedHistory = prepareChatHistory(this.chatHistory);
+					let fullText = '';
+					const toolCalls: any[] = [];
+
+					for await (const chunk of this.openaiService.chatStream(
+						currentMessage,
+						tools,
+						preparedHistory,
+						undefined
+					)) {
+						if (chunk.type === 'text' && chunk.content) {
+							fullText += chunk.content;
+							// DON'T yield text here - buffer it until we know if there are tool calls
+						} else if (chunk.type === 'tool_call' && chunk.toolCall) {
+							toolCalls.push(chunk.toolCall);
+						} else if (chunk.type === 'error') {
+							yield '\n\n[Error: ' + chunk.error + ']';
+							return;
+						}
 					}
 
+					// Handle tool calls if any
 					if (toolCalls.length > 0) {
-						assistantMessage.toolCalls = toolCalls.map(tc => ({
+						// Tool calls present - DON'T show the buffered text, just process tools silently
+
+						// Add assistant message with tool_calls to history
+						const assistantMessage: GenericChatMessage = {
+							role: 'assistant',
+						};
+
+						if (fullText) {
+							assistantMessage.content = fullText;
+						}
+
+						assistantMessage.toolCalls = toolCalls.map((tc) => ({
 							id: tc.id,
 							type: 'function' as const,
 							function: {
@@ -974,67 +1098,75 @@ export class MCPServer {
 								arguments: JSON.stringify(tc.parameters),
 							},
 						}));
-					}
 
-					// Ensure message has either content or toolCalls
-					if (!assistantMessage.content && !assistantMessage.toolCalls) {
-						assistantMessage.content = 'Processing request...';
-					}
+						// Ensure message has either content or toolCalls
+						if (!assistantMessage.content && !assistantMessage.toolCalls) {
+							assistantMessage.content = 'Processing request...';
+						}
 
-					this.pushToHistory(assistantMessage);
+						this.pushToHistory(assistantMessage);
 
-					// Execute tools and collect results
-					const toolResults: GenericChatMessage[] = [];
-					for (const toolCall of toolCalls) {
-						try {
-							console.log(`Executing tool: ${toolCall.name}`, toolCall.parameters);
-							const result = await this.callTool(toolCall.name, toolCall.parameters);
-							console.log(`Tool ${toolCall.name} succeeded:`, result);
-							const toolContent = JSON.stringify(result);
-							if (toolContent && toolContent.trim()) {
+						// Execute tools and collect results
+						const toolResults: GenericChatMessage[] = [];
+						for (const toolCall of toolCalls) {
+							try {
+								console.log(`Executing tool: ${toolCall.name}`, toolCall.parameters);
+								const result = await this.callTool(toolCall.name, toolCall.parameters);
+								console.log(`Tool ${toolCall.name} succeeded:`, result);
+								const toolContent = JSON.stringify(result);
+								if (toolContent && toolContent.trim()) {
+									toolResults.push({
+										role: 'tool',
+										content: toolContent,
+										toolCallId: toolCall.id,
+									});
+								}
+							} catch (error: any) {
+								console.error(`Tool ${toolCall.name} failed:`, error);
+								const errorContent = {
+									success: false,
+									error: error.message,
+									tool: toolCall.name,
+									suggestion: error.message.includes('not found') || error.message.includes('User') || error.message.includes('ambiguous')
+										? 'Try using get_users_with_name_and_email tool first to find the correct user, then retry with the exact email address.'
+										: error.message.includes('403') || error.message.includes('Forbidden') 
+										? 'This operation requires application-level permissions or delegate access. The current user can only access their own calendar.'
+										: error.message.includes('401') || error.message.includes('Unauthorized')
+										? 'Authentication failed. Please sign out and sign in again.'
+										: 'An error occurred while executing the tool. You may retry with corrected parameters.',
+									retry_suggestion: error.message.includes('not found') || error.message.includes('ambiguous')
+										? 'Call get_users_with_name_and_email to see all users, then retry with the correct email.'
+										: undefined,
+								};
 								toolResults.push({
 									role: 'tool',
-									content: toolContent,
+									content: JSON.stringify(errorContent),
 									toolCallId: toolCall.id,
 								});
 							}
-						} catch (error: any) {
-							console.error(`Tool ${toolCall.name} failed:`, error);
-							const errorContent = {
-								success: false,
-								error: error.message,
-								tool: toolCall.name,
-								suggestion: error.message.includes('not found') || error.message.includes('User') || error.message.includes('ambiguous')
-									? 'Try using get_users_with_name_and_email tool first to find the correct user, then retry with the exact email address.'
-									: error.message.includes('403') || error.message.includes('Forbidden') 
-									? 'This operation requires application-level permissions or delegate access. The current user can only access their own calendar.'
-									: error.message.includes('401') || error.message.includes('Unauthorized')
-									? 'Authentication failed. Please sign out and sign in again.'
-									: 'An error occurred while executing the tool. You may retry with corrected parameters.',
-								retry_suggestion: error.message.includes('not found') || error.message.includes('ambiguous')
-									? 'Call get_users_with_name_and_email to see all users, then retry with the correct email.'
-									: undefined,
-							};
-							toolResults.push({
-								role: 'tool',
-								content: JSON.stringify(errorContent),
-								toolCallId: toolCall.id,
-							});
 						}
+
+						// Add tool results to chat history
+						this.pushToHistory(...toolResults);
+
+					const hasUserLookup = toolCalls.some((tc) => tc.name === 'get_users_with_name_and_email');
+					const hasPrimaryCalendarAction = toolCalls.some(
+						(tc) => tc.name === 'check_availability' || tc.name === 'book_meeting'
+					);
+
+					// If we only fetched users, allow one more tool round to perform the actual action.
+					if (hasUserLookup && !hasPrimaryCalendarAction) {
+						currentMessage =
+							'Continue based on the tool results above. If another tool call is needed, call it. Otherwise, answer the user clearly.';
+						continue;
 					}
 
-					// Add tool results to chat history
-					this.pushToHistory(...toolResults);
-
-					// Get final response with streaming
+					// Stream the final response after tools complete
 					const preparedHistoryForFinal = prepareChatHistory(this.chatHistory);
-					console.log('Requesting final streaming response from OpenAI');
 					let finalFullText = '';
-					
+
 					for await (const chunk of this.openaiService.chatStream(
-						'Based on the tool results above, provide a clear and direct answer to the user\'s question. ' +
-						'If a tool failed (e.g., user not found), you can use get_users_with_name_and_email to find the correct user, then retry the original tool. ' +
-						'Do not summarize actions taken, only provide the requested information.',
+						'Based on the tool results above, provide a clear and direct answer to the user\'s question.',
 						tools,
 						preparedHistoryForFinal,
 						'none'
@@ -1047,13 +1179,16 @@ export class MCPServer {
 						}
 					}
 
-					// Add final response to history
-					const finalResponse = finalFullText || 'I processed your request. How else can I help you?';
+					const finalResponse =
+						finalFullText || 'I processed your request. How else can I help you?';
 					this.pushToHistory({
 						role: 'assistant',
 						content: finalResponse,
 					});
-				} else {
+					completed = true;
+					break;
+					}
+
 					// No tool calls - yield the buffered text to the user
 					const responseText = fullText || 'I received your message. How can I help you?';
 					yield responseText;
@@ -1061,6 +1196,15 @@ export class MCPServer {
 						role: 'assistant',
 						content: responseText,
 					});
+					completed = true;
+					break;
+				}
+
+				if (!completed) {
+					const fallbackMessage =
+						'I was unable to complete the request after multiple attempts. Please rephrase or provide more details.';
+					yield fallbackMessage;
+					this.pushToHistory({ role: 'assistant', content: fallbackMessage });
 				}
 
 				// Save updated chat history

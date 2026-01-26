@@ -254,6 +254,89 @@ export class UnifiedMCPServer {
 		return { name, date };
 	}
 
+	private isConfirmation(message: string): boolean {
+		const normalized = message.toLowerCase().replace(/[^\w\s]/g, '').trim();
+		if (!normalized) return false;
+		if (normalized.length > 40) return false;
+		return /^(ok(?:ay)?|yes|yep|yeah|sure|please|go ahead|go do it|do it|go for it|sounds good|alright|proceed|confirm)\b/.test(
+			normalized
+		);
+	}
+
+	private getRecentAvailabilityIntent(): { name: string; date: string } | null {
+		for (let i = this.chatHistory.length - 1; i >= 0; i--) {
+			const msg = this.chatHistory[i];
+			if (msg.role !== 'user') continue;
+			const text = this.extractTextContent(msg.content);
+			const intent = this.detectAvailabilityIntent(text);
+			if (intent) return intent;
+		}
+		return null;
+	}
+
+	private resolveAvailabilityIntent(message: string): { name: string; date: string } | null {
+		const direct = this.detectAvailabilityIntent(message);
+		if (direct) return direct;
+		if (this.isConfirmation(message)) {
+			return this.getRecentAvailabilityIntent();
+		}
+		return null;
+	}
+
+	private detectTimeEntryIntent(message: string): boolean {
+		const lower = message.toLowerCase();
+		const hasHours = /\b\d+(\.\d+)?\s*(hours?|hrs?)\b/.test(lower);
+		const hasLogKeywords = /\b(log|record|submit|entry)\b/.test(lower);
+		const hasWorkContext = /\b(customer|client|tasks?|description|worked|billable)\b/.test(lower);
+		return hasHours || hasLogKeywords || hasWorkContext;
+	}
+
+	private determineToolScope(message: string): 'calendar' | 'billing' | 'all' {
+		const hasTimeEntryIntent = this.detectTimeEntryIntent(message);
+		const hasAvailabilityIntent = !!this.detectAvailabilityIntent(message);
+
+		if (hasTimeEntryIntent) {
+			return 'billing';
+		}
+		if (hasAvailabilityIntent) {
+			return 'calendar';
+		}
+		return 'all';
+	}
+
+	private hasMixedIntent(message: string): boolean {
+		const hasTimeEntryIntent = this.detectTimeEntryIntent(message);
+		const hasAvailabilityIntent = !!this.detectAvailabilityIntent(message);
+		return hasTimeEntryIntent && hasAvailabilityIntent;
+	}
+
+	private formatAvailabilityResponse(result: {
+		user_email: string;
+		date: string;
+		day_of_week: string;
+		busy_times?: Array<{ subject?: string; start: string; end: string }>;
+		total_events?: number;
+		note?: string;
+	}): string {
+		const busyTimes = result.busy_times || [];
+		if (busyTimes.length === 0) {
+			return `${result.user_email} is free all day on ${result.day_of_week} (${result.date}). ${result.note || ''}`.trim();
+		}
+
+		const lines = busyTimes.map((event) => {
+			const subject = event.subject ? ` (${event.subject})` : '';
+			return `- ${event.start} to ${event.end}${subject}`;
+		});
+
+		return [
+			`${result.user_email} is busy on ${result.day_of_week} (${result.date}) during:`,
+			...lines,
+			result.note || '',
+		]
+			.filter(Boolean)
+			.join('\n');
+	}
+
 	/**
 	 * Extract text content from ChatMessageV2 content field
 	 */
@@ -423,6 +506,10 @@ export class UnifiedMCPServer {
 				case 'check_availability': {
 					let userEmail = args.user_email;
 					const date = args.date;
+					const durationMinutes =
+						typeof args.duration_minutes === 'number' && args.duration_minutes > 0
+							? Math.round(args.duration_minutes)
+							: 30;
 
 					if (!userEmail.includes('@')) {
 						if (!this.aiHelper) {
@@ -457,6 +544,27 @@ export class UnifiedMCPServer {
 							end_datetime: this.formatLocalDateTime(event.end.dateTime),
 						}));
 
+					const availableSlots = await this.graphService.getAvailableSlotsForUser(
+						userEmail,
+						`${parsedDate}T09:00:00`,
+						`${parsedDate}T17:00:00`,
+						durationMinutes,
+						'Eastern Standard Time'
+					);
+
+					const freeSlots = availableSlots.map((slot) => {
+						const startLocal = this.convertToLocalTime(slot.start);
+						const endLocal = this.convertToLocalTime(slot.end);
+						const durationHours =
+							(new Date(slot.end).getTime() - new Date(slot.start).getTime()) /
+							(1000 * 60 * 60);
+						return {
+							start: startLocal,
+							end: endLocal,
+							duration_hours: Math.round(durationHours * 10) / 10,
+						};
+					});
+
 					const displayDate = new Date(parsedDate + 'T00:00:00');
 					const dayOfWeek = displayDate.toLocaleDateString('en-US', {
 						weekday: 'long',
@@ -469,7 +577,68 @@ export class UnifiedMCPServer {
 						day_of_week: dayOfWeek,
 						busy_times: busyTimes,
 						total_events: busyTimes.length,
+						free_slots: freeSlots,
 						is_completely_free: busyTimes.length === 0,
+						slot_minutes: durationMinutes,
+						note: 'All times are in Eastern Time (EST/EDT)',
+					};
+				}
+
+				case 'get_free_slots': {
+					let userEmail = args.user_email;
+					const date = args.date;
+					const durationMinutes = typeof args.duration_minutes === 'number' && args.duration_minutes > 0
+						? Math.round(args.duration_minutes)
+						: 30;
+
+					if (!userEmail.includes('@')) {
+						if (!this.aiHelper) {
+							throw new Error('Please provide user_email as an email address');
+						}
+						const usersList = await this.getCachedUsers();
+						const targetUser = await this.aiHelper.matchUserName(userEmail, usersList);
+						if (!targetUser) {
+							throw new Error(`User '${userEmail}' not found. Use get_users_with_name_and_email to see available users.`);
+						}
+						userEmail = targetUser.email;
+					}
+
+					const parsedDate = this.parseDate(date);
+					const startDateTime = `${parsedDate}T09:00:00`;
+					const endDateTime = `${parsedDate}T17:00:00`;
+					const timeZone = 'Eastern Standard Time';
+
+					const availableSlots = await this.graphService.getAvailableSlotsForUser(
+						userEmail,
+						startDateTime,
+						endDateTime,
+						durationMinutes,
+						timeZone
+					);
+
+					const formattedSlots = availableSlots.map((slot) => {
+						const startLocal = this.convertToLocalTime(slot.start);
+						const endLocal = this.convertToLocalTime(slot.end);
+						const durationHours = (new Date(slot.end).getTime() - new Date(slot.start).getTime()) / (1000 * 60 * 60);
+						return {
+							start: startLocal,
+							end: endLocal,
+							duration_hours: Math.round(durationHours * 10) / 10,
+						};
+					});
+
+					const displayDate = new Date(parsedDate + 'T00:00:00');
+					const dayOfWeek = displayDate.toLocaleDateString('en-US', {
+						weekday: 'long',
+						timeZone: 'America/New_York',
+					});
+
+					return {
+						user_email: userEmail,
+						date: parsedDate,
+						day_of_week: dayOfWeek,
+						free_slots: formattedSlots,
+						slot_minutes: durationMinutes,
 						note: 'All times are in Eastern Time (EST/EDT)',
 					};
 				}
@@ -700,8 +869,58 @@ export class UnifiedMCPServer {
 		try {
 			await this.loadHistory();
 
-			const tools = OpenAIService.createAllTools();
+			if (this.hasMixedIntent(userMessage)) {
+				const splitMessage =
+					'I can help with either calendar scheduling or time entry in a single request. Which would you like to do first?';
+				this.pushToHistory({ role: 'user', content: userMessage });
+				this.pushToHistory({ role: 'assistant', content: splitMessage });
+				yield splitMessage;
+				await this.saveHistory();
+				return;
+			}
+
+			const availabilityIntent = this.resolveAvailabilityIntent(userMessage);
+			const toolScope = availabilityIntent ? 'calendar' : this.determineToolScope(userMessage);
+			const tools =
+				toolScope === 'calendar'
+					? OpenAIService.createCalendarTools()
+					: toolScope === 'billing'
+						? OpenAIService.createTimeEntryTools()
+						: OpenAIService.createAllTools();
 			const preparedHistory = prepareChatHistory(this.chatHistory);
+
+			// Fast path: direct availability check (skip LLM latency)
+			if (availabilityIntent && toolScope === 'calendar') {
+				this.pushToHistory({ role: 'user', content: userMessage });
+				const toolCallId = `availability-${Date.now()}`;
+				try {
+					const toolResult = await this.callTool('check_availability', {
+						user_email: availabilityIntent.name,
+						date: availabilityIntent.date,
+					});
+					this.pushToHistory({
+						role: 'tool',
+						content: JSON.stringify(toolResult),
+						toolCallId,
+					});
+					const responseText = this.formatAvailabilityResponse(toolResult);
+					this.pushToHistory({ role: 'assistant', content: responseText });
+					yield responseText;
+					await this.saveHistory();
+					return;
+				} catch (error: any) {
+					const errorText = `I couldn't check availability: ${error.message}`;
+					this.pushToHistory({
+						role: 'tool',
+						content: JSON.stringify({ success: false, error: error.message }),
+						toolCallId,
+					});
+					this.pushToHistory({ role: 'assistant', content: errorText });
+					yield errorText;
+					await this.saveHistory();
+					return;
+				}
+			}
 
 			// Get current date info for the AI
 			const now = new Date();
@@ -737,7 +956,7 @@ export class UnifiedMCPServer {
 			  CALENDAR & MEETINGS
 			  - You can:
 				- Look up users by name and resolve them to their correct emails.
-				- Check availability for a given person on a specific date.
+				- Check availability for a given person on a specific date (free slots come from Microsoft Graph schedule/free-busy data).
 				- Book meetings on the logged-in user's calendar and invite others.
 			  - When the user says "When is Zaki available on <date>?" you MUST:
 				1) Treat this as a direct availability request.
@@ -882,7 +1101,6 @@ export class UnifiedMCPServer {
 
 				// If availability is clearly requested, ensure we call the graph tool
 				if (!forcedAvailabilityAttempted) {
-					const availabilityIntent = this.detectAvailabilityIntent(userMessage);
 					const hasAvailabilityCall = toolCalls.some((tc) => tc.name === 'check_availability');
 					if (availabilityIntent && !hasAvailabilityCall) {
 						forcedAvailabilityAttempted = true;

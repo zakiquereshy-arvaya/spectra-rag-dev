@@ -37,11 +37,13 @@ Categories:
 - "general": Greetings, questions about capabilities, unclear intent, mixed requests, or anything that doesn't clearly fit appointments or billing
 
 CRITICAL RULE: If a message contains time entry indicators (customer, hours, tasks, description, "log", "record", "submit") AND mentions "meeting", prioritize "billing" unless the message explicitly asks to schedule/book a meeting.
+CRITICAL RULE: If a message clearly asks for BOTH calendar actions and time entry logging in the same request, classify as "general" and set reasoning to "mixed_intent".
 
 Instructions:
 1. Analyze the message carefully - look for PRIMARY intent
 2. Consider context from chat history if provided
 3. If message mentions "meeting" but also has time entry keywords (customer, hours, tasks, log, record), classify as "billing"
+4. If both calendar intent and time entry intent are present, return category "general" with reasoning "mixed_intent"
 4. Assign a confidence score (0.0 to 1.0) based on how certain you are
 5. High confidence (0.8+): Clear, unambiguous intent
 6. Medium confidence (0.5-0.8): Likely intent but some ambiguity
@@ -187,6 +189,17 @@ Return ONLY the JSON classification.`;
 			/\b(log|record|submit|entry)\b/i.test(lower) ||
 			/\b\d+(\.\d+)?\s*(hours?|hrs?)\b/.test(lower) ||
 			/\b(customer|client|tasks?|description|worked)\b/i.test(lower);
+
+		const appointmentIndicators = /availability|available|free|open|schedule|booking|book|calendar|meeting/;
+		const hasAppointmentIndicators = appointmentIndicators.test(lower);
+
+		if (hasTimeEntryIndicators && hasAppointmentIndicators) {
+			return {
+				category: 'general',
+				confidence: 0.9,
+				reasoning: 'mixed_intent',
+			};
+		}
 
 		if (hasTimeEntryIndicators) {
 			for (const pattern of billingPatterns) {

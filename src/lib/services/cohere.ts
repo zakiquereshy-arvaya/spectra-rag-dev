@@ -382,7 +382,7 @@ export class CohereService {
 				function: {
 					name: 'check_availability',
 					description:
-						'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day. All times are displayed in Eastern Time (EST/EDT).',
+						'Check calendar availability for a user on a specific date. IMPORTANT: For best results, first call get_users_with_name_and_email to get the correct email address, then pass that email here. Returns busy times and free slots for the day. Free slots are derived from Microsoft Graph schedule data (getSchedule/freeBusy). All times are displayed in Eastern Time (EST/EDT).',
 					parameters: {
 						type: 'object',
 						properties: {
@@ -395,6 +395,34 @@ export class CohereService {
 								type: 'string',
 								description:
 									'The date to check. Supports natural language like "next monday", "tomorrow", "this friday", or date formats like "1/12/2026" or "2026-01-12". Defaults to today if not provided.',
+							},
+						},
+						required: ['user_email'],
+					},
+				},
+			},
+			{
+				type: 'function',
+				function: {
+					name: 'get_free_slots',
+					description:
+						'Get free time slots for a user on a specific date using Microsoft Graph schedule data. Use this when the user asks "what times are free/available?" All times are displayed in Eastern Time (EST/EDT).',
+					parameters: {
+						type: 'object',
+						properties: {
+							user_email: {
+								type: 'string',
+								description:
+									'The email address or display name of the user to check. If a name is provided, it will be matched against users from get_users_with_name_and_email.',
+							},
+							date: {
+								type: 'string',
+								description:
+									'The date to check. Supports natural language like "next monday", "tomorrow", "this friday", or date formats like "1/12/2026" or "2026-01-12". Defaults to today if not provided.',
+							},
+							duration_minutes: {
+								type: 'number',
+								description: 'Optional slot size in minutes (default: 30).',
 							},
 						},
 						required: ['user_email'],
