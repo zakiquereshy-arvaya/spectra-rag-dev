@@ -447,6 +447,20 @@ export class MicrosoftGraphService {
 	}
 
 	/**
+	 * Get schedule information for a specific user (app-only compatible)
+	 */
+	async getUserSchedule(
+		userEmail: string,
+		request: MicrosoftGraphFreeBusyRequest
+	): Promise<MicrosoftGraphFreeBusyResponse> {
+		const userId = await this.getUserIdByEmail(userEmail);
+		return this.request<MicrosoftGraphFreeBusyResponse>(`/users/${userId}/calendar/getSchedule`, {
+			method: 'POST',
+			body: JSON.stringify(request),
+		});
+	}
+
+	/**
 	 * Create a new calendar event
 	 */
 	async createEvent(
@@ -563,6 +577,65 @@ export class MicrosoftGraphService {
 			const slotEnd = new Date(current.getTime() + intervalMs);
 			
 			// Check if this slot overlaps with any busy times
+			const isBusy = schedule.scheduleItems?.some((item) => {
+				const itemStart = new Date(item.start.dateTime);
+				const itemEnd = new Date(item.end.dateTime);
+				return (
+					(current >= itemStart && current < itemEnd) ||
+					(slotEnd > itemStart && slotEnd <= itemEnd) ||
+					(current <= itemStart && slotEnd >= itemEnd)
+				);
+			});
+
+			if (!isBusy) {
+				availableSlots.push({
+					start: current.toISOString(),
+					end: slotEnd.toISOString(),
+				});
+			}
+		}
+
+		return availableSlots;
+	}
+
+	/**
+	 * Get available time slots for a specific user (app-only compatible)
+	 */
+	async getAvailableSlotsForUser(
+		userEmail: string,
+		startDate: string,
+		endDate: string,
+		durationMinutes: number = 30,
+		timeZone: string = 'UTC'
+	): Promise<Array<{ start: string; end: string }>> {
+		const freeBusyRequest: MicrosoftGraphFreeBusyRequest = {
+			schedules: [userEmail],
+			startTime: {
+				dateTime: startDate,
+				timeZone,
+			},
+			endTime: {
+				dateTime: endDate,
+				timeZone,
+			},
+			availabilityViewInterval: durationMinutes,
+		};
+
+		const scheduleResponse = await this.getUserSchedule(userEmail, freeBusyRequest);
+
+		if (!scheduleResponse.value || scheduleResponse.value.length === 0) {
+			return [];
+		}
+
+		const schedule = scheduleResponse.value[0];
+		const availableSlots: Array<{ start: string; end: string }> = [];
+		const start = new Date(startDate);
+		const end = new Date(endDate);
+		const intervalMs = durationMinutes * 60 * 1000;
+
+		for (let current = new Date(start); current < end; current = new Date(current.getTime() + intervalMs)) {
+			const slotEnd = new Date(current.getTime() + intervalMs);
+
 			const isBusy = schedule.scheduleItems?.some((item) => {
 				const itemStart = new Date(item.start.dateTime);
 				const itemEnd = new Date(item.end.dateTime);

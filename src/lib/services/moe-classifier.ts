@@ -1,8 +1,8 @@
 // MoE Classifier - Intent classification with confidence scoring
 // Routes user messages to the appropriate expert based on intent
 
-import { CohereClientV2 } from 'cohere-ai';
-import type { ChatMessageV2 } from 'cohere-ai/api';
+import OpenAI from 'openai';
+import type { ChatMessage } from './openai-service';
 
 export interface ClassificationResult {
 	category: 'appointments' | 'billing' | 'general';
@@ -11,11 +11,11 @@ export interface ClassificationResult {
 }
 
 export class MoEClassifier {
-	private client: CohereClientV2;
+	private client: OpenAI;
 	private model: string;
 
-	constructor(apiKey: string, model: string = 'command-a-03-2025') {
-		this.client = new CohereClientV2({ token: apiKey });
+	constructor(apiKey: string, model: string = 'gpt-4o-mini') {
+		this.client = new OpenAI({ apiKey });
 		this.model = model;
 	}
 
@@ -27,7 +27,7 @@ export class MoEClassifier {
 	 */
 	async classify(
 		message: string,
-		chatHistory?: ChatMessageV2[]
+		chatHistory?: ChatMessage[]
 	): Promise<ClassificationResult> {
 		const systemPrompt = `You are an intent classifier for Arvaya AI & Automations. Your job is to categorize user messages into one of three categories.
 
@@ -37,11 +37,13 @@ Categories:
 - "general": Greetings, questions about capabilities, unclear intent, mixed requests, or anything that doesn't clearly fit appointments or billing
 
 CRITICAL RULE: If a message contains time entry indicators (customer, hours, tasks, description, "log", "record", "submit") AND mentions "meeting", prioritize "billing" unless the message explicitly asks to schedule/book a meeting.
+CRITICAL RULE: If a message clearly asks for BOTH calendar actions and time entry logging in the same request, classify as "general" and set reasoning to "mixed_intent".
 
 Instructions:
 1. Analyze the message carefully - look for PRIMARY intent
 2. Consider context from chat history if provided
 3. If message mentions "meeting" but also has time entry keywords (customer, hours, tasks, log, record), classify as "billing"
+4. If both calendar intent and time entry intent are present, return category "general" with reasoning "mixed_intent"
 4. Assign a confidence score (0.0 to 1.0) based on how certain you are
 5. High confidence (0.8+): Clear, unambiguous intent
 6. Medium confidence (0.5-0.8): Likely intent but some ambiguity
@@ -62,7 +64,7 @@ ${chatHistory && chatHistory.length > 0 ? `Recent context: ${this.summarizeHisto
 Return ONLY the JSON classification.`;
 
 		try {
-			const response = await this.client.chat({
+			const response = await this.client.chat.completions.create({
 				model: this.model,
 				messages: [
 					{ role: 'system', content: systemPrompt },
@@ -86,41 +88,27 @@ Return ONLY the JSON classification.`;
 	 * Summarize chat history for context
 	 * Where is this getting the last three history messages form, shouldnt it be requerying the database for the last three messages?, the issue I take is the local storage is going to be too large and slow down the app. Or Crash it
 	 */
-	private summarizeHistory(chatHistory: ChatMessageV2[]): string {
+	private summarizeHistory(chatHistory: ChatMessage[]): string {
 		// Take last 3 messages for context
 		const recent = chatHistory.slice(-3);
 		return recent
 			.map((msg) => {
-				const content =
-					typeof msg.content === 'string'
-						? msg.content
-						: Array.isArray(msg.content)
-							? msg.content
-									.filter((item: any) => item.type === 'text')
-									.map((item: any) => item.text)
-									.join('')
-							: '';
+				const content = typeof msg.content === 'string' ? msg.content : '';
 				return `${msg.role}: ${content.substring(0, 100)}`;
 			})
 			.join(' | ');
 	}
 
 	/**
-	 * Parse Cohere response into ClassificationResult
+	 * Parse OpenAI response into ClassificationResult
 	 */
-	private parseClassification(response: unknown): ClassificationResult {
+	private parseClassification(response: OpenAI.Chat.Completions.ChatCompletion): ClassificationResult {
 		let text = '';
-		const message = (response as { message?: { content?: unknown } })?.message;
-		const content = message?.content;
+		const choice = response.choices[0];
+		const content = choice?.message?.content;
 
 		if (typeof content === 'string') {
 			text = content.trim();
-		} else if (Array.isArray(content)) {
-			text = content
-				.filter((item: unknown) => (item as { type?: string })?.type === 'text')
-				.map((item: unknown) => (item as { text?: string })?.text || '')
-				.join('')
-				.trim();
 		}
 
 		if (!text) {
@@ -201,6 +189,17 @@ Return ONLY the JSON classification.`;
 			/\b(log|record|submit|entry)\b/i.test(lower) ||
 			/\b\d+(\.\d+)?\s*(hours?|hrs?)\b/.test(lower) ||
 			/\b(customer|client|tasks?|description|worked)\b/i.test(lower);
+
+		const appointmentIndicators = /availability|available|free|open|schedule|booking|book|calendar|meeting/;
+		const hasAppointmentIndicators = appointmentIndicators.test(lower);
+
+		if (hasTimeEntryIndicators && hasAppointmentIndicators) {
+			return {
+				category: 'general',
+				confidence: 0.9,
+				reasoning: 'mixed_intent',
+			};
+		}
 
 		if (hasTimeEntryIndicators) {
 			for (const pattern of billingPatterns) {

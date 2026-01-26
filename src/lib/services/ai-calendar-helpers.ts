@@ -1,21 +1,41 @@
-import { CohereClientV2 } from 'cohere-ai';
-
 export interface User {
 	name: string;
 	email: string;
 }
 
 export class CalendarAIHelper {
-	private client: CohereClientV2;
-	private model: string;
-	private readonly minConfidenceName = 0.9;
-	private readonly minConfidenceSender = 0.95;
+	constructor(_apiKey: string, _model: string = 'gpt-4o-mini') {}
 
-	constructor(apiKey: string, model: string = 'command-a-03-2025') {
-		this.client = new CohereClientV2({
-			token: apiKey,
-		});
-		this.model = model;
+	private normalizeName(name: string): string {
+		return name
+			.toLowerCase()
+			.replace(/[^a-z0-9\s]/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
+	}
+
+	private isLikelySamePerson(nameA: string, nameB: string): boolean {
+		const normalizedA = this.normalizeName(nameA);
+		const normalizedB = this.normalizeName(nameB);
+
+		if (!normalizedA || !normalizedB) {
+			return false;
+		}
+
+		if (normalizedA === normalizedB) {
+			return true;
+		}
+
+		if (normalizedA.includes(normalizedB) || normalizedB.includes(normalizedA)) {
+			return true;
+		}
+
+		const tokensA = new Set(normalizedA.split(' '));
+		const tokensB = new Set(normalizedB.split(' '));
+		const overlap = [...tokensA].filter((token) => tokensB.has(token)).length;
+		const maxTokens = Math.max(tokensA.size, tokensB.size);
+
+		return maxTokens > 0 && overlap / maxTokens >= 0.6;
 	}
 
 	async matchUserName(queryName: string, usersList: User[]): Promise<User | null> {
@@ -27,96 +47,43 @@ export class CalendarAIHelper {
 			return null;
 		}
 
-		try {
-			const prompt = `You are a user name matching assistant. Given a query name and a list of users, 
-find the best matching user. You must be STRICT to prevent false matches.
+		const normalizedQuery = this.normalizeName(queryName);
+		if (!normalizedQuery) {
+			return null;
+		}
 
-Query: "${queryName}"
-Users: ${JSON.stringify(usersList, null, 2)}
+		if (normalizedQuery.includes('@')) {
+			const exactEmail = usersList.find(
+				(user) => user.email.toLowerCase().trim() === normalizedQuery
+			);
+			return exactEmail || null;
+		}
 
-Rules:
-- Match possessive forms (e.g., "ryan's" → "Ryan Botindari") ONLY if unambiguous
-- Match partial names (e.g., "zaki" → "Zaki Quereshy") ONLY if unique
-- Match nicknames ONLY if obvious and unambiguous
-- If multiple users could match, return null (do not guess)
-- Confidence must be > 0.9 to return a match
-- Return JSON: {"name": "...", "email": "...", "confidence": 0.0-1.0}
-- If confidence < 0.9 or ambiguous, return: {"match": null, "reason": "..."}
-
-Return ONLY valid JSON, no other text.`;
-
-			const response = await this.client.chat({
-				model: this.model,
-				messages: [
-					{
-						role: 'system',
-						content: 'You are a strict user name matching assistant. Return only valid JSON.',
-					},
-					{
-						role: 'user',
-						content: prompt,
-					},
-				],
-				temperature: 0.1,
-				maxTokens: 200,
-			});
-
-			let resultText = '';
-			const content = response.message?.content;
-			if (content) {
-				if (typeof content === 'string') {
-					resultText = (content as string).trim();
-				} else if (Array.isArray(content)) {
-					const textParts: string[] = content
-						.filter((item: any) => item.type === 'text')
-						.map((item: any) => (item.text || '') as string);
-					resultText = textParts.join('').trim();
-				}
+		const queryTokens = new Set(normalizedQuery.split(' '));
+		const candidates = usersList.filter((user) => {
+			const normalizedUser = this.normalizeName(user.name);
+			if (!normalizedUser) return false;
+			if (normalizedUser === normalizedQuery) return true;
+			if (normalizedUser.includes(normalizedQuery) || normalizedQuery.includes(normalizedUser)) {
+				return true;
 			}
+			const userTokens = new Set(normalizedUser.split(' '));
+			const allTokensMatch = [...queryTokens].every((token) => userTokens.has(token));
+			return allTokensMatch;
+		});
 
-			if (!resultText) {
-				console.warn(`No response from AI for name matching: ${queryName}`);
-				return null;
-			}
+		if (candidates.length === 1) {
+			return candidates[0];
+		}
 
-			if (resultText.startsWith('```')) {
-				resultText = resultText.split('```')[1];
-				if (resultText.startsWith('json')) {
-					resultText = resultText.slice(4);
-				}
-				resultText = resultText.trim();
-			}
-
-			const result = JSON.parse(resultText);
-
-			if (result.match === null) {
-				console.log(`No match found for '${queryName}': ${result.reason || 'Unknown reason'}`);
-				return null;
-			}
-
-			const confidence = result.confidence || 0.0;
-			if (confidence < this.minConfidenceName) {
-				console.log(
-					`Match found for '${queryName}' but confidence ${confidence} < ${this.minConfidenceName}`
-				);
-				return null;
-			}
-
-			const matchedUser: User = {
-				name: result.name,
-				email: result.email,
-			};
-
-			console.log(`AI matched '${queryName}' → '${matchedUser.name}' (confidence: ${confidence})`);
-			return matchedUser;
-		} catch (error: any) {
-			console.error(`AI name matching failed for '${queryName}':`, error);
+		if (candidates.length > 1) {
+			const suggestions = candidates.slice(0, 3).map((user) => `${user.name} <${user.email}>`);
 			throw new Error(
-				`Failed to match user name '${queryName}'. ` +
-					`Please use get_users_with_name_and_email tool first to get the correct email address. ` +
-					`Error: ${error.message || 'Unknown error'}`
+				`User '${queryName}' is ambiguous. Please specify which person you mean. Candidates: ${suggestions.join(', ')}`
 			);
 		}
+
+		return null;
 	}
 
 	async validateSender(
@@ -158,95 +125,15 @@ Return ONLY valid JSON, no other text.`;
 			return senderUserByEmail;
 		}
 
-		try {
-			const prompt = `Validate that sender_email "${senderEmail}" belongs to a user 
-whose name matches "${senderName}" (allowing for natural variations like possessive forms, 
-nicknames, but must be the SAME person).
-
-Found user by email: ${JSON.stringify(senderUserByEmail, null, 2)}
-All users: ${JSON.stringify(usersList, null, 2)}
-
-CRITICAL: 
-- sender_email MUST exist in the users list (already verified)
-- sender_name MUST match the user associated with sender_email
-- Be strict - if uncertain, return valid: false
-- Confidence must be > 0.95 to return valid: true
-
-Return JSON: {"name": "...", "email": "...", "valid": true/false, "confidence": 0.0-1.0}
-Return ONLY valid JSON, no other text.`;
-
-			const response = await this.client.chat({
-				model: this.model,
-				messages: [
-					{
-						role: 'system',
-						content: 'You are a strict sender validation assistant. Return only valid JSON.',
-					},
-					{
-						role: 'user',
-						content: prompt,
-					},
-				],
-				temperature: 0.1,
-				maxTokens: 200,
-			});
-
-			let resultText = '';
-			const content = response.message?.content;
-			if (content) {
-				if (typeof content === 'string') {
-					resultText = (content as string).trim();
-				} else if (Array.isArray(content)) {
-					const textParts: string[] = content
-						.filter((item: any) => item.type === 'text')
-						.map((item: any) => (item.text || '') as string);
-					resultText = textParts.join('').trim();
-				}
-			}
-
-			if (!resultText) {
-				console.warn('AI validation response empty, using email-based match');
-				return senderUserByEmail;
-			}
-
-			if (resultText.startsWith('```')) {
-				resultText = resultText.split('```')[1];
-				if (resultText.startsWith('json')) {
-					resultText = resultText.slice(4);
-				}
-				resultText = resultText.trim();
-			}
-
-			const result = JSON.parse(resultText);
-
-			const isValid = result.valid || false;
-			const confidence = result.confidence || 0.0;
-
-			if (!isValid || confidence < this.minConfidenceSender) {
-				throw new Error(
-					`Sender validation failed: sender_name '${senderName}' does not match ` +
-						`the user associated with sender_email '${senderEmail}'. ` +
-						`Confidence: ${confidence}. ` +
-						`Please use get_users_with_name_and_email to get the correct sender information.`
-				);
-			}
-
-			const validatedUser: User = {
-				name: result.name || senderUserByEmail.name,
-				email: result.email || senderEmail,
-			};
-
-			console.log(
-				`AI validated sender '${senderName}' with email '${senderEmail}' (confidence: ${confidence})`
-			);
-			return validatedUser;
-		} catch (error: any) {
-			if (error.message?.includes('Sender validation failed')) {
-				throw error;
-			}
-			console.error(`AI sender validation failed:`, error);
-			console.warn('AI validation failed, using email-based match');
+		if (this.isLikelySamePerson(senderName, senderUserByEmail.name)) {
 			return senderUserByEmail;
 		}
+
+		throw new Error(
+			`Sender validation failed: sender_name '${senderName}' does not match ` +
+				`the user associated with sender_email '${senderEmail}'. ` +
+				`Expected name similar to '${senderUserByEmail.name}'. ` +
+				`Please use get_users_with_name_and_email to get the correct sender information.`
+		);
 	}
 }

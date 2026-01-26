@@ -1,6 +1,12 @@
+// OpenAI Service - Replacement for CohereService
+// Uses GPT-4o-mini with function calling and streaming support
 
-import { CohereClientV2 } from 'cohere-ai';
-import type { ChatMessageV2, ToolV2 } from 'cohere-ai/api';
+import OpenAI from 'openai';
+import type {
+	ChatCompletionMessageParam,
+	ChatCompletionTool,
+	ChatCompletionToolChoiceOption,
+} from 'openai/resources/chat/completions';
 
 export interface ChatResponse {
 	text: string;
@@ -22,22 +28,153 @@ export interface StreamChunk {
 	error?: string;
 }
 
-export class CohereService {
-	private client: CohereClientV2;
+// Message types for chat history (compatible with previous Cohere types)
+// Uses unknown for content to accept various message formats from storage
+export interface ChatMessage {
+	role: 'system' | 'user' | 'assistant' | 'tool';
+	content?: string | null | unknown;
+	toolCalls?: Array<{
+		id: string;
+		type: 'function';
+		function: {
+			name: string;
+			arguments: string;
+		};
+	}>;
+	toolCallId?: string;
+	toolResults?: Array<{ content?: string }>;
+	_timestamp?: string;
+}
+
+// Tool definition type (OpenAI function format)
+export interface ToolDefinition {
+	type: 'function';
+	function: {
+		name: string;
+		description: string;
+		parameters: {
+			type: 'object';
+			properties: Record<string, unknown>;
+			required?: string[];
+		};
+	};
+}
+
+export class OpenAIService {
+	private client: OpenAI;
 	private model: string;
 
-	constructor(apiKey: string, model: string = 'command-a-03-2025') {
-		this.client = new CohereClientV2({
-			token: apiKey,
+	constructor(apiKey: string, model: string = 'gpt-4o-mini') {
+		this.client = new OpenAI({
+			apiKey: apiKey,
 		});
 		this.model = model;
 	}
 
 	/**
-	 * Build the messages array with optional system message
+	 * Helper to extract string content from various formats
 	 */
-	private buildMessages(message: string, chatHistory?: ChatMessageV2[]): ChatMessageV2[] {
-		const messages: ChatMessageV2[] = [];
+	private extractContentString(content: unknown): string {
+		if (content === null || content === undefined) {
+			return '';
+		}
+		if (typeof content === 'string') {
+			return content;
+		}
+		// Handle Cohere-style array content
+		if (Array.isArray(content)) {
+			return content
+				.map((c) => {
+					if (typeof c === 'string') return c;
+					if (c && typeof c === 'object' && 'text' in c) return String(c.text);
+					return '';
+				})
+				.filter(Boolean)
+				.join('\n');
+		}
+		// Handle object with text property
+		if (typeof content === 'object' && content !== null && 'text' in content) {
+			return String((content as { text: unknown }).text);
+		}
+		return String(content);
+	}
+
+	/**
+	 * Convert internal ChatMessage format to OpenAI message format
+	 */
+	private convertToOpenAIMessages(messages: ChatMessage[]): ChatCompletionMessageParam[] {
+		return messages.map((msg): ChatCompletionMessageParam => {
+			const contentStr = this.extractContentString(msg.content);
+
+			if (msg.role === 'system') {
+				return {
+					role: 'system',
+					content: contentStr,
+				};
+			}
+
+			if (msg.role === 'user') {
+				return {
+					role: 'user',
+					content: contentStr,
+				};
+			}
+
+			if (msg.role === 'assistant') {
+				const assistantMsg: ChatCompletionMessageParam = {
+					role: 'assistant',
+					content: contentStr || null,
+				};
+
+				if (msg.toolCalls && msg.toolCalls.length > 0) {
+					(assistantMsg as any).tool_calls = msg.toolCalls.map((tc) => ({
+						id: tc.id,
+						type: 'function' as const,
+						function: {
+							name: tc.function.name,
+							arguments: tc.function.arguments,
+						},
+					}));
+				}
+
+				return assistantMsg;
+			}
+
+			if (msg.role === 'tool') {
+				return {
+					role: 'tool',
+					content: contentStr,
+					tool_call_id: msg.toolCallId || '',
+				};
+			}
+
+			// Fallback
+			return {
+				role: 'user',
+				content: contentStr,
+			};
+		});
+	}
+
+	/**
+	 * Convert internal tool definitions to OpenAI format
+	 */
+	private convertToOpenAITools(tools: ToolDefinition[]): ChatCompletionTool[] {
+		return tools.map((tool) => ({
+			type: 'function' as const,
+			function: {
+				name: tool.function.name,
+				description: tool.function.description,
+				parameters: tool.function.parameters as Record<string, unknown>,
+			},
+		}));
+	}
+
+	/**
+	 * Build the messages array with optional system message for booking
+	 */
+	private buildMessages(message: string, chatHistory?: ChatMessage[]): ChatMessage[] {
+		const messages: ChatMessage[] = [];
 
 		// Add system message if this looks like a booking request
 		if (
@@ -48,7 +185,7 @@ export class CohereService {
 			messages.push({
 				role: 'system',
 				content:
-					'You are a helpful calendar assistant. When users ask to book, schedule, or create meetings, you MUST use the book_meeting tool. First call get_users_with_name_and_email to get the sender_email, then use book_meeting with all required parameters. You CAN and SHOULD book meetings when requested.',
+					'You are a helpful calendar assistant. When users ask to book, schedule, or create meetings, you MUST use the book_meeting tool. First call get_users_with_name_and_email to get the sender_email, then use book_meeting with all required parameters. You CAN and SHOULD book meetings when requested. If given a partial name like Ryan, Ashlee, David, etc. You must find the proper user and not pretend they dont exist. if its not recognized, identify the correct user',
 			});
 		}
 
@@ -61,37 +198,29 @@ export class CohereService {
 	}
 
 	/**
-	 * Extract response data from Cohere message
+	 * Extract response data from OpenAI message
 	 */
-	private extractResponse(responseMessage: any): ChatResponse {
-		let text = '';
+	private extractResponse(choice: OpenAI.Chat.Completions.ChatCompletion.Choice): ChatResponse {
+		const message = choice.message;
+		const text = message.content || '';
 		const toolCalls: ChatResponse['tool_calls'] = [];
 
-		if (responseMessage) {
-			// Handle content - can be string or array
-			if (typeof responseMessage.content === 'string') {
-				text = responseMessage.content;
-			} else if (Array.isArray(responseMessage.content)) {
-				text = responseMessage.content
-					.filter((item: any) => item.type === 'text')
-					.map((item: any) => item.text)
-					.join('');
-			}
-
-			// Extract tool calls if present
-			if (responseMessage.toolCalls && Array.isArray(responseMessage.toolCalls)) {
-				for (const toolCall of responseMessage.toolCalls) {
+		if (message.tool_calls && message.tool_calls.length > 0) {
+			for (const toolCall of message.tool_calls) {
+				// Handle OpenAI function tool calls
+				const tc = toolCall as { id: string; type: string; function?: { name: string; arguments: string } };
+				if (tc.type === 'function' && tc.function) {
 					let parameters: Record<string, unknown> = {};
-					if (toolCall.function?.arguments) {
+					if (tc.function.arguments) {
 						try {
-							parameters = JSON.parse(toolCall.function.arguments);
+							parameters = JSON.parse(tc.function.arguments);
 						} catch {
 							parameters = {};
 						}
 					}
 					toolCalls.push({
-						id: toolCall.id || '',
-						name: toolCall.function?.name || '',
+						id: tc.id || '',
+						name: tc.function.name || '',
 						parameters,
 					});
 				}
@@ -105,28 +234,41 @@ export class CohereService {
 	}
 
 	/**
-	 * Chat with Cohere Command model using official SDK (non-streaming)
+	 * Chat with OpenAI model (non-streaming)
 	 */
 	async chat(
 		message: string,
-		tools?: ToolV2[],
-		chatHistory?: ChatMessageV2[],
-		toolChoice: 'REQUIRED' | 'NONE' | undefined = undefined
+		tools?: ToolDefinition[],
+		chatHistory?: ChatMessage[],
+		toolChoice?: 'required' | 'none' | undefined
 	): Promise<ChatResponse> {
 		try {
 			const messages = this.buildMessages(message, chatHistory);
+			const openaiMessages = this.convertToOpenAIMessages(messages);
 
-			const response = await this.client.chat({
+			let openaiToolChoice: ChatCompletionToolChoiceOption | undefined;
+			if (toolChoice === 'required') {
+				openaiToolChoice = 'required';
+			} else if (toolChoice === 'none') {
+				openaiToolChoice = 'none';
+			}
+
+			const response = await this.client.chat.completions.create({
 				model: this.model,
-				messages: messages,
-				tools: tools && tools.length > 0 ? tools : undefined,
-				toolChoice: toolChoice,
+				messages: openaiMessages,
+				tools: tools && tools.length > 0 ? this.convertToOpenAITools(tools) : undefined,
+				tool_choice: tools && tools.length > 0 ? openaiToolChoice : undefined,
 			});
 
-			return this.extractResponse(response.message);
+			const choice = response.choices[0];
+			if (!choice) {
+				return { text: '' };
+			}
+
+			return this.extractResponse(choice);
 		} catch (error: any) {
-			console.error('Cohere SDK error:', error);
-			throw new Error(`Cohere API error: ${error.message || 'Unknown error'}`);
+			console.error('OpenAI SDK error:', error);
+			throw new Error(`OpenAI API error: ${error.message || 'Unknown error'}`);
 		}
 	}
 
@@ -135,91 +277,119 @@ export class CohereService {
 	 */
 	async *chatStream(
 		message: string,
-		tools?: ToolV2[],
-		chatHistory?: ChatMessageV2[],
-		toolChoice: 'REQUIRED' | 'NONE' | undefined = undefined
+		tools?: ToolDefinition[],
+		chatHistory?: ChatMessage[],
+		toolChoice?: 'required' | 'none' | undefined
 	): AsyncGenerator<StreamChunk> {
 		try {
 			const messages = this.buildMessages(message, chatHistory);
+			const openaiMessages = this.convertToOpenAIMessages(messages);
 
-			console.log('[Cohere Stream] Starting stream with toolChoice:', toolChoice);
+			let openaiToolChoice: ChatCompletionToolChoiceOption | undefined;
+			if (toolChoice === 'required') {
+				openaiToolChoice = 'required';
+			} else if (toolChoice === 'none') {
+				openaiToolChoice = 'none';
+			}
 
-			const stream = await this.client.chatStream({
+			console.log('[OpenAI Stream] Starting stream with toolChoice:', toolChoice ?? 'auto');
+
+			const stream = await this.client.chat.completions.create({
 				model: this.model,
-				messages: messages,
-				tools: tools && tools.length > 0 ? tools : undefined,
-				toolChoice: toolChoice,
+				messages: openaiMessages,
+				tools: tools && tools.length > 0 ? this.convertToOpenAITools(tools) : undefined,
+				tool_choice: tools && tools.length > 0 ? openaiToolChoice : undefined,
+				stream: true,
 			});
 
-			let currentToolCall: {
-				id: string;
-				name: string;
-				arguments: string;
-			} | null = null;
+			// Track tool calls being built
+			const toolCallsInProgress: Map<
+				number,
+				{
+					id: string;
+					name: string;
+					arguments: string;
+				}
+			> = new Map();
 
-			for await (const event of stream) {
-				console.log('[Cohere Stream] Event type:', event.type);
-				
-				// Handle different event types
-				if (event.type === 'content-delta') {
-					// Text content chunk
-					const delta = event.delta as any;
-					if (delta?.message?.content?.text) {
-						console.log('[Cohere Stream] Text chunk:', delta.message.content.text);
-						yield {
-							type: 'text',
-							content: delta.message.content.text,
-						};
+			for await (const chunk of stream) {
+				const delta = chunk.choices[0]?.delta;
+				const finishReason = chunk.choices[0]?.finish_reason;
+
+				// Handle text content
+				if (delta?.content) {
+					console.log('[OpenAI Stream] Text chunk:', delta.content);
+					yield {
+						type: 'text',
+						content: delta.content,
+					};
+				}
+
+				// Handle tool calls
+				if (delta?.tool_calls) {
+					for (const toolCallDelta of delta.tool_calls) {
+						const index = toolCallDelta.index;
+
+						// Initialize tool call if this is the start
+						if (toolCallDelta.id) {
+							toolCallsInProgress.set(index, {
+								id: toolCallDelta.id,
+								name: toolCallDelta.function?.name || '',
+								arguments: '',
+							});
+							console.log('[OpenAI Stream] Tool call start:', toolCallDelta.function?.name);
+						}
+
+						// Accumulate function name if provided
+						if (toolCallDelta.function?.name) {
+							const tc = toolCallsInProgress.get(index);
+							if (tc && !tc.name) {
+								tc.name = toolCallDelta.function.name;
+							}
+						}
+
+						// Accumulate arguments
+						if (toolCallDelta.function?.arguments) {
+							const tc = toolCallsInProgress.get(index);
+							if (tc) {
+								tc.arguments += toolCallDelta.function.arguments;
+							}
+						}
 					}
-				} else if (event.type === 'tool-call-start') {
-					// Start of a tool call
-					const delta = event.delta as any;
-					if (delta?.message?.toolCalls) {
-						const toolCall = delta.message.toolCalls;
-						currentToolCall = {
-							id: toolCall.id || '',
-							name: toolCall.function?.name || '',
-							arguments: '',
-						};
-						console.log('[Cohere Stream] Tool call start:', currentToolCall.name);
-					}
-				} else if (event.type === 'tool-call-delta') {
-					const delta = event.delta as any;
-					if (currentToolCall && delta?.message?.toolCalls?.function?.arguments) {
-						currentToolCall.arguments += delta.message.toolCalls.function.arguments;
-					}
-				} else if (event.type === 'tool-call-end') {
-					// End of tool call - parse and yield
-					if (currentToolCall) {
+				}
+
+				// Handle finish reason
+				if (finishReason === 'tool_calls' || finishReason === 'stop') {
+					// Yield all completed tool calls
+					for (const [, toolCall] of toolCallsInProgress) {
 						let parameters: Record<string, unknown> = {};
 						try {
-							if (currentToolCall.arguments) {
-								parameters = JSON.parse(currentToolCall.arguments);
+							if (toolCall.arguments) {
+								parameters = JSON.parse(toolCall.arguments);
 							}
 						} catch {
 							parameters = {};
 						}
-						console.log('[Cohere Stream] Tool call end:', currentToolCall.name, parameters);
+
+						console.log('[OpenAI Stream] Tool call end:', toolCall.name, parameters);
 						yield {
 							type: 'tool_call',
 							toolCall: {
-								id: currentToolCall.id,
-								name: currentToolCall.name,
+								id: toolCall.id,
+								name: toolCall.name,
 								parameters,
 							},
 						};
-						currentToolCall = null;
 					}
-				} else if (event.type === 'message-end') {
-					// Stream complete
-					console.log('[Cohere Stream] Stream complete');
+
+					console.log('[OpenAI Stream] Stream complete, finish_reason:', finishReason);
 					yield { type: 'done' };
 				}
 			}
 
-			console.log('[Cohere Stream] Finished iterating stream');
+			console.log('[OpenAI Stream] Finished iterating stream');
 		} catch (error: any) {
-			console.error('[Cohere Stream] Error:', error);
+			console.error('[OpenAI Stream] Error:', error);
 			yield {
 				type: 'error',
 				error: error.message || 'Streaming error',
@@ -231,7 +401,7 @@ export class CohereService {
 	 * Create tool definitions for time entry/billing operations
 	 * Used by the billing expert in MoE
 	 */
-	static createTimeEntryTools(): ToolV2[] {
+	static createTimeEntryTools(): ToolDefinition[] {
 		return [
 			{
 				type: 'function',
@@ -354,7 +524,7 @@ export class CohereService {
 	/**
 	 * Create all tools (calendar + time entry) for unified expert
 	 */
-	static createAllTools(): ToolV2[] {
+	static createAllTools(): ToolDefinition[] {
 		return [...this.createCalendarTools(), ...this.createTimeEntryTools()];
 	}
 
@@ -362,7 +532,7 @@ export class CohereService {
 	 * Create tool definitions for Microsoft Graph calendar operations
 	 * Based on the Python FastMCP implementation
 	 */
-	static createCalendarTools(): ToolV2[] {
+	static createCalendarTools(): ToolDefinition[] {
 		return [
 			{
 				type: 'function',
@@ -406,7 +576,7 @@ export class CohereService {
 				function: {
 					name: 'get_free_slots',
 					description:
-						'Get free time slots for a user on a specific date using Microsoft Graph schedule data. Use this when the user asks "what times are free/available?" All times are displayed in Eastern Time (EST/EDT).',
+						'Get free time slots for a user on a specific date using Microsoft Graph schedule data. Use this when the user asks "what times are free/available?" or wants specific availability windows. All times are in Eastern Time (EST/EDT).',
 					parameters: {
 						type: 'object',
 						properties: {
@@ -478,3 +648,6 @@ export class CohereService {
 		];
 	}
 }
+
+// Re-export the ChatMessage type as the compatible type for external use
+export type { ChatMessage as ChatMessageV2 };

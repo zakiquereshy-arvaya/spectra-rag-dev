@@ -22,7 +22,7 @@ export interface MoEResponse {
 }
 
 export interface MoERouterConfig {
-	cohereApiKey: string;
+	openaiApiKey: string;
 	sessionId: string;
 	authService?: MicrosoftGraphAuth;
 	accessToken?: string;
@@ -40,7 +40,7 @@ export class MoERouter {
 
 	constructor(config: MoERouterConfig) {
 		this.config = config;
-		this.classifier = new MoEClassifier(config.cohereApiKey);
+		this.classifier = new MoEClassifier(config.openaiApiKey);
 	}
 
 	/**
@@ -49,7 +49,7 @@ export class MoERouter {
 	private getAppointmentsExpert(): MCPServer {
 		if (!this.appointmentsExpert) {
 			this.appointmentsExpert = new MCPServer(
-				this.config.cohereApiKey,
+				this.config.openaiApiKey,
 				this.config.sessionId,
 				this.config.authService,
 				this.config.accessToken,
@@ -65,7 +65,7 @@ export class MoERouter {
 	private getBillingExpert(): BillingMCPServer {
 		if (!this.billingExpert) {
 			this.billingExpert = new BillingMCPServer(
-				this.config.cohereApiKey,
+				this.config.openaiApiKey,
 				this.config.sessionId,
 				this.config.loggedInUser,
 				this.config.webhookUrl
@@ -80,7 +80,7 @@ export class MoERouter {
 	private getUnifiedExpert(): UnifiedMCPServer {
 		if (!this.unifiedExpert) {
 			this.unifiedExpert = new UnifiedMCPServer(
-				this.config.cohereApiKey,
+				this.config.openaiApiKey,
 				this.config.sessionId,
 				this.config.authService,
 				this.config.accessToken,
@@ -121,12 +121,14 @@ export class MoERouter {
 	 * Determine which expert to use based on classification
 	 */
 	private determineExpert(classification: ClassificationResult): 'appointments' | 'billing' | 'unified' {
-		if (classification.confidence >= CONFIDENCE_THRESHOLD) {
-			if (classification.category === 'appointments') {
-				return 'appointments';
-			} else if (classification.category === 'billing') {
-				return 'billing';
-			}
+		if (classification.category === 'appointments') {
+			return 'appointments';
+		}
+		if (classification.category === 'billing') {
+			return 'billing';
+		}
+		if (classification.confidence >= CONFIDENCE_THRESHOLD && classification.category === 'general') {
+			return 'unified';
 		}
 		// Low confidence or general category -> unified expert
 		return 'unified';
@@ -145,6 +147,10 @@ export class MoERouter {
 
 		// Step 1: Classify the message
 		const classification = await this.classifyMessage(message);
+		if (classification.reasoning === 'mixed_intent') {
+			yield 'I can help with either calendar scheduling or time entry in a single request. Which would you like to do first?';
+			return;
+		}
 
 		// Step 2: Determine which expert to use
 		const expertType = this.determineExpert(classification);

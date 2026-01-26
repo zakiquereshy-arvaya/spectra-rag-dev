@@ -4,7 +4,7 @@ import { MoERouter } from '$lib/services/moe-router';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
 import {
-	COHERE_API_KEY,
+	OPENAI_API_KEY,
 	AUTH_MICROSOFT_ENTRA_ID_ID,
 	AUTH_MICROSOFT_ENTRA_ID_SECRET,
 	AUTH_MICROSOFT_ENTRA_ID_ISSUER,
@@ -19,9 +19,9 @@ export const POST: RequestHandler = async (event) => {
 		return new Response('Unauthorized', { status: 401 });
 	}
 
-	const cohereApiKey = COHERE_API_KEY;
-	if (!cohereApiKey) {
-		return new Response('Cohere API key not configured', { status: 500 });
+	const openaiApiKey = OPENAI_API_KEY;
+	if (!openaiApiKey) {
+		return new Response('OpenAI API key not configured', { status: 500 });
 	}
 
 	// Set up Microsoft Graph auth
@@ -58,7 +58,7 @@ export const POST: RequestHandler = async (event) => {
 
 		// Create MoE Router
 		const router = new MoERouter({
-			cohereApiKey,
+			openaiApiKey,
 			sessionId: sessionId || 'default',
 			authService,
 			accessToken: accessToken || undefined,
