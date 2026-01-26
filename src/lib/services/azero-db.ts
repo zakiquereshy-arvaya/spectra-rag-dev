@@ -77,6 +77,7 @@ export async function getCustomerByName(name: string): Promise<Customer | null> 
 	const client = getAZeroClient();
 
 	// Check for alias first
+	//lower to force id 
 	const lowerName = name.toLowerCase().trim();
 	const resolvedName = CUSTOMER_ALIASES[lowerName] || name;
 

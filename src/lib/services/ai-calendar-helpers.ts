@@ -18,6 +18,38 @@ export class CalendarAIHelper {
 		this.model = model;
 	}
 
+	private normalizeName(name: string): string {
+		return name
+			.toLowerCase()
+			.replace(/[^a-z0-9\s]/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
+	}
+
+	private isLikelySamePerson(nameA: string, nameB: string): boolean {
+		const normalizedA = this.normalizeName(nameA);
+		const normalizedB = this.normalizeName(nameB);
+
+		if (!normalizedA || !normalizedB) {
+			return false;
+		}
+
+		if (normalizedA === normalizedB) {
+			return true;
+		}
+
+		if (normalizedA.includes(normalizedB) || normalizedB.includes(normalizedA)) {
+			return true;
+		}
+
+		const tokensA = new Set(normalizedA.split(' '));
+		const tokensB = new Set(normalizedB.split(' '));
+		const overlap = [...tokensA].filter((token) => tokensB.has(token)).length;
+		const maxTokens = Math.max(tokensA.size, tokensB.size);
+
+		return maxTokens > 0 && overlap / maxTokens >= 0.6;
+	}
+
 	async matchUserName(queryName: string, usersList: User[]): Promise<User | null> {
 		if (!queryName || !queryName.trim()) {
 			return null;
@@ -148,6 +180,10 @@ Return ONLY valid JSON, no other text.`;
 		}
 
 		if (!senderName || !senderName.trim()) {
+			return senderUserByEmail;
+		}
+
+		if (this.isLikelySamePerson(senderName, senderUserByEmail.name)) {
 			return senderUserByEmail;
 		}
 

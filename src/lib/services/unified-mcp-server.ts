@@ -15,7 +15,6 @@ import {
 import { getChatHistoryAsync, setChatHistoryAsync } from './chat-history-store';
 import { prepareChatHistory } from '$lib/utils/tokens';
 
-// Extended message type with timestamp for storage
 type StoredChatMessage = GenericChatMessage;
 
 export interface UnifiedMCPRequest {
