@@ -1,6 +1,6 @@
 
-import type { ChatMessageV2 } from 'cohere-ai/api';
-import { CohereService } from './cohere';
+import { OpenAIService } from './openai-service';
+import type { GenericChatMessage } from '$lib/utils/tokens';
 import { MicrosoftGraphService } from './microsoft-graph';
 import { MicrosoftGraphAuth } from './microsoft-graph-auth';
 import { CalendarAIHelper } from './ai-calendar-helpers';
@@ -16,7 +16,7 @@ import { getChatHistoryAsync, setChatHistoryAsync } from './chat-history-store';
 import { prepareChatHistory } from '$lib/utils/tokens';
 
 // Extended message type with timestamp for storage
-type StoredChatMessage = ChatMessageV2 & { _timestamp?: string };
+type StoredChatMessage = GenericChatMessage;
 
 export interface UnifiedMCPRequest {
 	message: string;
@@ -24,7 +24,7 @@ export interface UnifiedMCPRequest {
 }
 
 export class UnifiedMCPServer {
-	private cohereService: CohereService;
+	private openaiService: OpenAIService;
 	private graphService: MicrosoftGraphService;
 	private aiHelper: CalendarAIHelper | null;
 	private sessionId: string;
@@ -41,17 +41,17 @@ export class UnifiedMCPServer {
 	private cachedCustomers: Customer[] | null = null;
 
 	constructor(
-		cohereApiKey: string,
+		openaiApiKey: string,
 		sessionId: string,
 		authService?: MicrosoftGraphAuth,
 		accessToken?: string,
 		loggedInUser?: { name: string; email: string },
 		webhookUrl?: string
 	) {
-		this.cohereService = new CohereService(cohereApiKey);
+		this.openaiService = new OpenAIService(openaiApiKey);
 		this.graphService = new MicrosoftGraphService(accessToken, authService);
 		try {
-			this.aiHelper = new CalendarAIHelper(cohereApiKey);
+			this.aiHelper = new CalendarAIHelper(openaiApiKey);
 		} catch {
 			this.aiHelper = null;
 		}
@@ -80,7 +80,7 @@ export class UnifiedMCPServer {
 	/**
 	 * Add message(s) to chat history with timestamp
 	 */
-	private pushToHistory(...messages: ChatMessageV2[]): void {
+	private pushToHistory(...messages: GenericChatMessage[]): void {
 		for (const msg of messages) {
 			const now = Date.now();
 			const timestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1;
@@ -156,6 +156,11 @@ export class UnifiedMCPServer {
 			const [month, day, year] = lower.split('/').map(Number);
 			return new Date(year, month - 1, day).toISOString().split('T')[0];
 		}
+		if (lower.match(/^\d{1,2}\/\d{1,2}$/)) {
+			const [month, day] = lower.split('/').map(Number);
+			const year = today.getFullYear();
+			return new Date(year, month - 1, day).toISOString().split('T')[0];
+		}
 		if (lower.match(/^\d{4}-\d{2}-\d{2}$/)) {
 			return lower;
 		}
@@ -199,6 +204,56 @@ export class UnifiedMCPServer {
 	}
 
 	// ==================== TIME ENTRY DETECTION ====================
+
+	private extractAvailabilityName(message: string): string | null {
+		const text = message.trim();
+		const patterns = [
+			/(?:with|for)\s+([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2})/i,
+			/(?:book|meet(?:ing)?\s+with)\s+([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2})/i,
+			/([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2})'s\s+availability/i,
+			/(?:availability|available)\s+(?:for|of)\s+([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2})/i,
+		];
+		const stopWords = new Set(['me', 'my', 'i', 'we', 'us', 'our', 'someone', 'anyone', 'team']);
+		for (const pattern of patterns) {
+			const match = text.match(pattern);
+			if (match?.[1]) {
+				const name = match[1].trim().replace(/[.,!?]$/, '');
+				if (name && !stopWords.has(name.toLowerCase())) {
+					return name;
+				}
+			}
+		}
+		return null;
+	}
+
+	private extractAvailabilityDate(message: string): string | null {
+		const text = message.toLowerCase();
+		const datePatterns = [
+			/\b\d{4}-\d{2}-\d{2}\b/,
+			/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/,
+			/\b(today|tomorrow|yesterday)\b/,
+			/\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/,
+		];
+		for (const pattern of datePatterns) {
+			const match = text.match(pattern);
+			if (match?.[0]) {
+				return this.parseDate(match[0]);
+			}
+		}
+		return null;
+	}
+
+	private detectAvailabilityIntent(message: string): { name: string; date: string } | null {
+		const lower = message.toLowerCase();
+		const availabilityKeywords = /availability|available|free|open|schedule|booking|book|meet(?:ing)?/i;
+		if (!availabilityKeywords.test(lower)) return null;
+
+		const name = this.extractAvailabilityName(message);
+		const date = this.extractAvailabilityDate(message);
+
+		if (!name || !date) return null;
+		return { name, date };
+	}
 
 	/**
 	 * Extract text content from ChatMessageV2 content field
@@ -646,7 +701,7 @@ export class UnifiedMCPServer {
 		try {
 			await this.loadHistory();
 
-			const tools = CohereService.createAllTools();
+			const tools = OpenAIService.createAllTools();
 			const preparedHistory = prepareChatHistory(this.chatHistory);
 
 			// Get current date info for the AI
@@ -655,59 +710,107 @@ export class UnifiedMCPServer {
 			const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/New_York' });
 			const formattedDate = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' });
 
-			const systemMessage: ChatMessageV2 = {
+			const systemMessage: GenericChatMessage = {
 				role: 'system',
 				content: `You are Billi, an AI assistant for Arvaya. You help with time tracking and calendar management.
-
-**CURRENT DATE: ${dayOfWeek}, ${formattedDate} (${todayStr})**
-- "today" = ${todayStr}
-- "yesterday" = ${new Date(now.getTime() - 86400000).toISOString().split('T')[0]}
-
-**LOGGED-IN USER: ${this.loggedInUser?.name || 'Unknown'} (${this.loggedInUser?.email || 'no email'})**
-
-**WHAT YOU CAN DO (tell users this):**
-- Log time entries for projects (just need customer, hours, and description)
-- Check calendar availability for team members
-- Book meetings with Teams links
-
-**INTERNAL TOOLS (never mention these to users):**
-- lookup_employee, lookup_customer, list_employees, list_customers - use these internally
-- QBO IDs - NEVER mention these exist
-
-**TIME ENTRY WORKFLOW (CRITICAL - MUST FOLLOW):**
-1. User says "log 2 hours for ICE" or similar
-2. You MUST silently call lookup_employee("${this.loggedInUser?.name || ''}") to get employee_qbo_id
-3. You MUST silently call lookup_customer("ICE") to get customer_qbo_id
-4. You MUST call submit_time_entry with ALL required fields (employee_name, employee_qbo_id, customer_name, customer_qbo_id, tasks_completed, hours, entry_date)
-5. ONLY AFTER submit_time_entry returns success=true, you confirm: "Logged 2 hours for Infrastructure Consulting & Engineering"
-
-**MULTI-TASK TIME ENTRIES:**
-When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. ICE - Task B - 1 hour"):
-1. Parse ALL entries in the message
-2. If SAME customer: Aggregate into ONE submit_time_entry with summed hours and combined tasks
-   - Example: customer=ICE, hours=2, tasks="Task A, Task B"
-3. If DIFFERENT customers: Call submit_time_entry MULTIPLE times (one per customer)
-   - Each customer needs its own lookup_customer call
-   - Call submit_time_entry separately for each customer
-
-**Multi-entry patterns to recognize:**
-- Period-separated: "Customer - Task - X hours. Customer - Task - Y hours"
-- Comma-separated: "Customer: Task A (2 hrs), Task B (1 hr)"
-- Dash-separated: "Customer - Task A - 1 hour - Task B - 1 hour"
-- Natural language: "2 hours for ICE on API work and 1 hour for Arvaya on docs"
-- Line breaks or bullet points
-
-**CRITICAL RULES:**
-- NEVER claim to have logged time without actually calling submit_time_entry
-- NEVER say "Logged X hours" unless submit_time_entry tool was called and returned success=true
-- You MUST call submit_time_entry when user requests time logging - it is REQUIRED, not optional
-- If you have all the information (employee, customer, hours, tasks), you MUST call submit_time_entry immediately
-- The logged-in user IS the employee - never ask for their name
-- "Arvaya" and "ICE" are customers
-- All times are Eastern Time
-- When user says "today", use entry_date="${todayStr}" (YYYY-MM-DD format)
-- NEVER mention QuickBooks, QBO, IDs, or internal lookups to users`,
-			};
+			  
+			  CURRENT DATE CONTEXT
+			  - Today: ${dayOfWeek}, ${formattedDate} (${todayStr})
+			  - "today" = ${todayStr}
+			  - "yesterday" = ${new Date(now.getTime() - 86400000).toISOString().split('T')[0]}
+			  
+			  LOGGED-IN USER
+			  - Name: ${this.loggedInUser?.name || 'Unknown'}
+			  - Email: ${this.loggedInUser?.email || 'no email'}
+			  - The logged-in user IS the employee and meeting organizer. Never ask them for their own name or email.
+			  
+			  WHAT YOU CAN DO (tell users this):
+			  - Log time entries for projects (needs customer, hours, and description).
+			  - Check calendar availability for team members.
+			  - Book meetings with Teams links.
+			  
+			  GENERAL EXECUTION RULES (CRITICAL)
+			  - If a user request can be completed with the available tools and information, you MUST execute the action instead of asking unnecessary questions.
+			  - You may ask at most one short clarifying question only when a REQUIRED field is truly missing (e.g., no meeting subject).
+			  - When you ask a yes/no question (e.g., "Would you like me to list all customers?"), a "yes" reply MUST trigger that action. Do not repeat the same error message.
+			  - Do NOT ask the user for email addresses you can infer from names or from the logged-in user info. Pass names and let the backend resolve them.
+			  
+			  CALENDAR & MEETINGS
+			  - You can:
+				- Look up users by name and resolve them to their correct emails.
+				- Check availability for a given person on a specific date.
+				- Book meetings on the logged-in user's calendar and invite others.
+			  - When the user says "When is Zaki available on <date>?" you MUST:
+				1) Treat this as a direct availability request.
+				2) Use the name (e.g., "Zaki", "Zaki Queres(y)") to find the correct person.
+				3) Call the availability tool for that person on that date.
+			  - When the user says "I want a meeting with Zaki on <date> at <time>":
+				- Assume the logged-in user is the organizer.
+				- Use the same date from the request (or the most recent date used for availability if the user gives only a time).
+				- Convert natural language time like "11", "11am", "11:30", "930" into a concrete start and end time using Eastern Time.
+				- Book the meeting if there is no explicit conflict returned by the tools.
+			  - You MUST NOT say "I need their email address" if you can pass a display name and let the backend resolve it.
+			  - After booking a meeting, always confirm:
+				- Who the meeting is with.
+				- Date and time range in Eastern Time.
+				- That an invite has been created (and a Teams link if present).
+			  
+			  TIME ENTRY WORKFLOW (CRITICAL - MUST FOLLOW)
+			  1. When a user says "log 2 hours for ICE" or any similar phrasing, treat this as a request to create a time entry.
+			  2. You MUST silently:
+				 - Look up the employee using the logged-in user's name to get employee_qbo_id.
+				 - Look up the customer (e.g., "ICE", "Arvaya") to get customer_qbo_id (use fuzzy matching if close).
+			  3. Once you have employee and customer IDs, you MUST call the time-entry submission tool with ALL required fields:
+				 - employee_name, employee_qbo_id
+				 - customer_name, customer_qbo_id
+				 - tasks_completed (description)
+				 - hours (positive number)
+				 - entry_date (YYYY-MM-DD; "today" = ${todayStr} unless user specifies another date)
+			  4. ONLY AFTER the submission tool returns success=true may you confirm to the user, e.g.:
+				 - "Logged 2 hours for Infrastructure Consulting & Engineering for today: API work."
+			  
+			  MULTI-TASK TIME ENTRIES
+			  When the user provides multiple tasks in one message (for one or more customers):
+			  1. Parse ALL entries in the message.
+			  2. If all entries are for the SAME customer:
+				 - Aggregate into ONE submission with summed hours and combined tasks description.
+			  3. If entries reference DIFFERENT customers:
+				 - Submit one time entry per customer.
+				 - Each customer must be looked up before submission.
+			  Patterns to recognize:
+			  - Period-separated: "Customer - Task - X hours. Customer - Task - Y hours"
+			  - Comma-separated: "Customer: Task A (2 hrs), Task B (1 hr)"
+			  - Dash-separated: "Customer - Task A - 1 hour - Task B - 1 hour"
+			  - Natural language: "2 hours for ICE on API work and 1 hour for Arvaya on docs"
+			  - Bullet points or line breaks.
+			  
+			  CRITICAL LOGGING RULES
+			  - NEVER claim to have logged time, submitted time, or created entries unless the submission tool has actually been called and returned success=true.
+			  - If you have all required information for a time entry, you MUST call the submission tool immediately.
+			  - If a lookup fails (employee or customer not found), do NOT keep repeating the same error:
+				- Either:
+				  - Use fuzzy matches when there is a clear single match, OR
+				  - Ask the user to choose from a short list of suggestions, then try again.
+			  
+			  NAME & CUSTOMER HANDLING
+			  - "Arvaya" and "Arvaya Consulting" should be treated as the same customer if the backend indicates a unique match.
+			  - "ICE" is an alias for "Infrastructure Consulting & Engineering".
+			  - When a provided name is close to exactly one known user/customer, use that match automatically.
+			  - Only treat a name as "not found" if:
+				- There is truly no plausible match, OR
+				- There are several equally likely matches and you have already asked the user to choose.
+			  
+			  TIME & TIMEZONE
+			  - All scheduling and availability are in Eastern Time (EST/EDT).
+			  - When the user mentions "today" or "tomorrow", map those to real dates in YYYY-MM-DD format using the current date above.
+			  - When the user provides a time without AM/PM (e.g., "11" or "930"), infer a reasonable AM/PM based on normal working hours (prefer 9–5 daytime) unless the user clearly indicates otherwise.
+			  
+			  SUMMARY OF BEHAVIOR
+			  - Prefer taking real actions (checking availability, booking meetings, logging time) over asking redundant questions.
+			  - Use the backend's ability to resolve names to emails and IDs; do not block on information that can be inferred.
+			  - Minimize refusals and generic "unable to" messages. If something fails, explain clearly what went wrong and suggest a specific next step (e.g., "I couldn't find that customer; here are the closest matches: ... Which one should I use?").`,
+			  };
+				  
 
 			// Add user message to history
 			this.pushToHistory({ role: 'user', content: userMessage });
@@ -718,6 +821,7 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 			let timeEntryActuallySubmitted = false;
 			let timeEntryError: string | null = null;
 			let currentMessage = userMessage;
+			let forcedAvailabilityAttempted = false;
 
 			while (iteration < MAX_ITERATIONS) {
 				iteration++;
@@ -727,8 +831,8 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 				let fullText = '';
 				const toolCalls: any[] = [];
 
-				// Call Cohere and collect response WITHOUT yielding text
-				for await (const chunk of this.cohereService.chatStream(
+				// Call OpenAI and collect response WITHOUT yielding text
+				for await (const chunk of this.openaiService.chatStream(
 					currentMessage,
 					tools,
 					[systemMessage, ...preparedHistory],
@@ -777,6 +881,23 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 					}
 				}
 
+				// If availability is clearly requested, ensure we call the graph tool
+				if (!forcedAvailabilityAttempted) {
+					const availabilityIntent = this.detectAvailabilityIntent(userMessage);
+					const hasAvailabilityCall = toolCalls.some((tc) => tc.name === 'check_availability');
+					if (availabilityIntent && !hasAvailabilityCall) {
+						forcedAvailabilityAttempted = true;
+						toolCalls.push({
+							id: `forced-availability-${Date.now()}`,
+							name: 'check_availability',
+							parameters: {
+								user_email: availabilityIntent.name,
+								date: availabilityIntent.date,
+							},
+						});
+					}
+				}
+
 				// No tool calls = done, yield final response
 				if (toolCalls.length === 0) {
 					const responseText = fullText || 'How can I help you today?';
@@ -786,9 +907,8 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 				}
 
 				// Tool calls present - execute them silently
-				// Note: Cohere API doesn't allow both content and toolCalls in the same message
-				const assistantMessage: ChatMessageV2 = { role: 'assistant' };
-				// Don't set content when toolCalls are present - Cohere API constraint
+				const assistantMessage: GenericChatMessage = { role: 'assistant' };
+				// Set content if any, and add tool calls
 				assistantMessage.toolCalls = toolCalls.map((tc) => ({
 					id: tc.id,
 					type: 'function' as const,
@@ -797,7 +917,7 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 				this.pushToHistory(assistantMessage);
 
 				// Execute tools
-				const toolResults: ChatMessageV2[] = [];
+				const toolResults: GenericChatMessage[] = [];
 				for (const toolCall of toolCalls) {
 					try {
 						console.log(`[UnifiedMCP] Executing tool: ${toolCall.name}`);

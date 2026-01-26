@@ -22,7 +22,7 @@ export interface MoEResponse {
 }
 
 export interface MoERouterConfig {
-	cohereApiKey: string;
+	openaiApiKey: string;
 	sessionId: string;
 	authService?: MicrosoftGraphAuth;
 	accessToken?: string;
@@ -40,7 +40,7 @@ export class MoERouter {
 
 	constructor(config: MoERouterConfig) {
 		this.config = config;
-		this.classifier = new MoEClassifier(config.cohereApiKey);
+		this.classifier = new MoEClassifier(config.openaiApiKey);
 	}
 
 	/**
@@ -49,7 +49,7 @@ export class MoERouter {
 	private getAppointmentsExpert(): MCPServer {
 		if (!this.appointmentsExpert) {
 			this.appointmentsExpert = new MCPServer(
-				this.config.cohereApiKey,
+				this.config.openaiApiKey,
 				this.config.sessionId,
 				this.config.authService,
 				this.config.accessToken,
@@ -65,7 +65,7 @@ export class MoERouter {
 	private getBillingExpert(): BillingMCPServer {
 		if (!this.billingExpert) {
 			this.billingExpert = new BillingMCPServer(
-				this.config.cohereApiKey,
+				this.config.openaiApiKey,
 				this.config.sessionId,
 				this.config.loggedInUser,
 				this.config.webhookUrl
@@ -80,7 +80,7 @@ export class MoERouter {
 	private getUnifiedExpert(): UnifiedMCPServer {
 		if (!this.unifiedExpert) {
 			this.unifiedExpert = new UnifiedMCPServer(
-				this.config.cohereApiKey,
+				this.config.openaiApiKey,
 				this.config.sessionId,
 				this.config.authService,
 				this.config.accessToken,

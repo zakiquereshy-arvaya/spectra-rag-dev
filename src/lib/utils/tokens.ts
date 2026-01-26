@@ -1,34 +1,58 @@
 /**
  * Token Counting and Context Management Utilities
- * Provides token estimation and chat history truncation for Cohere API
+ * Provides token estimation and chat history truncation for OpenAI API
  */
 
-import type { ChatMessageV2 } from 'cohere-ai/api';
+// Generic message type that works with both OpenAI and legacy Cohere formats
+export interface GenericChatMessage {
+	role: 'system' | 'user' | 'assistant' | 'tool';
+	content?: string | null | unknown;
+	toolCalls?: Array<{
+		id: string;
+		type: 'function';
+		function: {
+			name: string;
+			arguments: string;
+		};
+	}>;
+	toolCallId?: string;
+	toolResults?: Array<{ content?: string }>;
+	_timestamp?: string;
+}
+
+// Re-export for compatibility
+export type ChatMessage = GenericChatMessage;
 
 /**
  * Model context limits (in tokens)
- * Command A has 256K context, but we leave headroom for response
+ * GPT-4o-mini has 128K context, but we leave headroom for response
  */
 export const MODEL_LIMITS = {
+	'gpt-4o-mini': {
+		contextWindow: 128000,
+		maxOutputTokens: 16384,
+		// Leave 20% headroom for response and safety margin
+		effectiveInputLimit: 100000,
+	},
+	'gpt-4o': {
+		contextWindow: 128000,
+		maxOutputTokens: 16384,
+		effectiveInputLimit: 100000,
+	},
+	'gpt-4-turbo': {
+		contextWindow: 128000,
+		maxOutputTokens: 4096,
+		effectiveInputLimit: 100000,
+	},
+	// Legacy Cohere models for backward compatibility
 	'command-a-03-2025': {
 		contextWindow: 256000,
 		maxOutputTokens: 4096,
-		// Leave 20% headroom for response and safety margin
 		effectiveInputLimit: 200000,
-	},
-	'command-r-plus': {
-		contextWindow: 128000,
-		maxOutputTokens: 4096,
-		effectiveInputLimit: 100000,
-	},
-	'command-r': {
-		contextWindow: 128000,
-		maxOutputTokens: 4096,
-		effectiveInputLimit: 100000,
 	},
 	default: {
 		contextWindow: 128000,
-		maxOutputTokens: 4096,
+		maxOutputTokens: 16384,
 		effectiveInputLimit: 100000,
 	},
 } as const;
@@ -60,7 +84,7 @@ export function estimateTokens(text: string): number {
 /**
  * Estimate token count for a chat message
  */
-export function estimateMessageTokens(message: ChatMessageV2): number {
+export function estimateMessageTokens(message: GenericChatMessage): number {
 	let tokens = 0;
 
 	// Role overhead (~2-4 tokens)
@@ -108,7 +132,7 @@ export function estimateMessageTokens(message: ChatMessageV2): number {
 /**
  * Estimate total tokens for a chat history
  */
-export function estimateChatHistoryTokens(messages: ChatMessageV2[]): number {
+export function estimateChatHistoryTokens(messages: GenericChatMessage[]): number {
 	return messages.reduce((total, msg) => total + estimateMessageTokens(msg), 0);
 }
 
@@ -117,14 +141,14 @@ export function estimateChatHistoryTokens(messages: ChatMessageV2[]): number {
  * Preserves the most recent messages and system messages
  */
 export function truncateChatHistory(
-	messages: ChatMessageV2[],
+	messages: GenericChatMessage[],
 	maxTokens: number,
 	options: {
 		preserveSystemMessages?: boolean;
 		preserveRecentCount?: number;
 		summarizeOld?: boolean;
 	} = {}
-): ChatMessageV2[] {
+): GenericChatMessage[] {
 	const { preserveSystemMessages = true, preserveRecentCount = 4 } = options;
 
 	// If already within limit, return as-is
@@ -162,7 +186,7 @@ export function truncateChatHistory(
 	const olderMessages = nonSystemMessages.slice(0, -preserveRecentCount);
 	const remainingTokens = availableTokens - recentTokens;
 
-	const includedOlder: ChatMessageV2[] = [];
+	const includedOlder: GenericChatMessage[] = [];
 	let usedTokens = 0;
 
 	// Add from oldest to newest (to maintain order)
@@ -187,8 +211,8 @@ export function truncateChatHistory(
 /**
  * Simple message truncation - removes oldest messages first
  */
-function truncateMessages(messages: ChatMessageV2[], maxTokens: number): ChatMessageV2[] {
-	const result: ChatMessageV2[] = [];
+function truncateMessages(messages: GenericChatMessage[], maxTokens: number): GenericChatMessage[] {
+	const result: GenericChatMessage[] = [];
 	let totalTokens = 0;
 
 	// Process from newest to oldest
@@ -218,7 +242,7 @@ export function getModelTokenLimit(model: string): number {
 /**
  * Check if chat history is within safe limits
  */
-export function isWithinTokenLimit(messages: ChatMessageV2[], model: string = 'command-a-03-2025'): boolean {
+export function isWithinTokenLimit(messages: GenericChatMessage[], model: string = 'gpt-4o-mini'): boolean {
 	const limit = getModelTokenLimit(model);
 	const tokens = estimateChatHistoryTokens(messages);
 	return tokens <= limit;
@@ -228,8 +252,8 @@ export function isWithinTokenLimit(messages: ChatMessageV2[], model: string = 'c
  * Get token usage info for a chat history
  */
 export function getTokenUsage(
-	messages: ChatMessageV2[],
-	model: string = 'command-a-03-2025'
+	messages: GenericChatMessage[],
+	model: string = 'gpt-4o-mini'
 ): {
 	used: number;
 	limit: number;
@@ -251,10 +275,10 @@ export function getTokenUsage(
 }
 
 /**
- * Strip internal fields (like _timestamp) that shouldn't be sent to Cohere API
+ * Strip internal fields (like _timestamp) that shouldn't be sent to OpenAI API
  */
-function stripInternalFields(message: ChatMessageV2): ChatMessageV2 {
-	const { _timestamp, ...cleanMessage } = message as ChatMessageV2 & { _timestamp?: string };
+function stripInternalFields(message: GenericChatMessage): GenericChatMessage {
+	const { _timestamp, ...cleanMessage } = message;
 	return cleanMessage;
 }
 
@@ -262,11 +286,11 @@ function stripInternalFields(message: ChatMessageV2): ChatMessageV2 {
  * Prepare chat history for API call - truncates if needed and strips internal fields
  */
 export function prepareChatHistory(
-	messages: ChatMessageV2[],
-	model: string = 'command-a-03-2025'
-): ChatMessageV2[] {
+	messages: GenericChatMessage[],
+	model: string = 'gpt-4o-mini'
+): GenericChatMessage[] {
 	const limit = getModelTokenLimit(model);
 	const truncated = truncateChatHistory(messages, limit);
-	// Strip internal fields like _timestamp before sending to Cohere
+	// Strip internal fields like _timestamp before sending to OpenAI
 	return truncated.map(stripInternalFields);
 }

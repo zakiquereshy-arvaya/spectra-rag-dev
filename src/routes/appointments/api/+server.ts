@@ -8,7 +8,7 @@ import {
 	AUTH_MICROSOFT_ENTRA_ID_SECRET,
 	AUTH_MICROSOFT_ENTRA_ID_ISSUER,
 	AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
-	COHERE_API_KEY
+	OPENAI_API_KEY
 } from '$env/static/private';
 import type { MCPRequest } from '$lib/types/mcp';
 
@@ -19,11 +19,11 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	// Get Cohere API key from private environment variable
-	const cohereApiKey = COHERE_API_KEY;
-	if (!cohereApiKey) {
+	// Get OpenAI API key from private environment variable
+	const openaiApiKey = OPENAI_API_KEY;
+	if (!openaiApiKey) {
 		return json(
-			{ error: 'Cohere API key not configured. Please set COHERE_API_KEY environment variable.' },
+			{ error: 'OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.' },
 			{ status: 500 }
 		);
 	}
@@ -72,7 +72,7 @@ export const POST: RequestHandler = async (event) => {
 			sessionId,
 			hasAuthService: !!authService,
 			hasAccessToken: !!accessToken,
-			hasCohereKey: !!cohereApiKey,
+			hasOpenaiKey: !!openaiApiKey,
 		});
 
 		// Get logged-in user information from session
@@ -90,7 +90,7 @@ export const POST: RequestHandler = async (event) => {
 
 		// Create MCP server instance with app-only auth (client credentials)
 		// This allows access to all users' calendars, not just the logged-in user
-		const mcpServer = new MCPServer(cohereApiKey, sessionId, authService, accessToken || undefined, loggedInUser);
+		const mcpServer = new MCPServer(openaiApiKey, sessionId, authService, accessToken || undefined, loggedInUser);
 
 		// Handle the request
 		const response = await mcpServer.handleRequest(mcpRequest);

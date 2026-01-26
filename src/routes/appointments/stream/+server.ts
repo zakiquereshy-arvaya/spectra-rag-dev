@@ -2,7 +2,7 @@ import type { RequestHandler } from './$types';
 import { MCPServer } from '$lib/services/mcp-server';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
-import { COHERE_API_KEY } from '$env/static/private';
+import { OPENAI_API_KEY } from '$env/static/private';
 import {
 	AUTH_MICROSOFT_ENTRA_ID_ID,
 	AUTH_MICROSOFT_ENTRA_ID_SECRET,
@@ -18,10 +18,10 @@ export const POST: RequestHandler = async (event) => {
 		return new Response('Unauthorized', { status: 401 });
 	}
 
-	// Get Cohere API key
-	const cohereApiKey = COHERE_API_KEY;
-	if (!cohereApiKey) {
-		return new Response('Cohere API key not configured', { status: 500 });
+	// Get OpenAI API key
+	const openaiApiKey = OPENAI_API_KEY;
+	if (!openaiApiKey) {
+		return new Response('OpenAI API key not configured', { status: 500 });
 	}
 
     //get graph
@@ -59,7 +59,7 @@ export const POST: RequestHandler = async (event) => {
 
 		// Create MCP server instance
 		const mcpServer = new MCPServer(
-			cohereApiKey,
+			openaiApiKey,
 			sessionId,
 			authService,
 			accessToken || undefined,

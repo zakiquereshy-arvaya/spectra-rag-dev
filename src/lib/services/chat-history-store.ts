@@ -1,9 +1,11 @@
 // Supabase-backed chat history store with automatic cleanup
 // Replaces in-memory storage to work properly on serverless (Vercel)
 
-import type { ChatMessageV2 } from 'cohere-ai/api';
-import { prepareChatHistory, getTokenUsage } from '$lib/utils/tokens';
+import { prepareChatHistory, getTokenUsage, type GenericChatMessage } from '$lib/utils/tokens';
 import { getSupabaseClient } from './supabase';
+
+// Re-export for compatibility
+export type ChatMessage = GenericChatMessage;
 
 // Session configuration
 const SESSION_CONFIG = {
@@ -14,7 +16,7 @@ const SESSION_CONFIG = {
 /**
  * Get chat history for a session from Supabase
  */
-export async function getChatHistoryAsync(sessionId: string): Promise<ChatMessageV2[]> {
+export async function getChatHistoryAsync(sessionId: string): Promise<GenericChatMessage[]> {
 	try {
 		const supabase = getSupabaseClient();
 		const { data, error } = await supabase
@@ -32,7 +34,7 @@ export async function getChatHistoryAsync(sessionId: string): Promise<ChatMessag
 			return [];
 		}
 
-		return (data?.messages as ChatMessageV2[]) || [];
+		return (data?.messages as GenericChatMessage[]) || [];
 	} catch (error) {
 		console.error('Error in getChatHistoryAsync:', error);
 		return [];
@@ -43,7 +45,7 @@ export async function getChatHistoryAsync(sessionId: string): Promise<ChatMessag
  * Synchronous version - returns empty, use async version instead
  * @deprecated Use getChatHistoryAsync instead
  */
-export function getChatHistory(sessionId: string): ChatMessageV2[] {
+export function getChatHistory(sessionId: string): GenericChatMessage[] {
 	// For backwards compatibility during transition
 	// The MCP server should be updated to use async version
 	console.warn(`getChatHistory called synchronously for ${sessionId} - returning empty. Use getChatHistoryAsync.`);
@@ -55,8 +57,8 @@ export function getChatHistory(sessionId: string): ChatMessageV2[] {
  */
 export async function getPreparedChatHistoryAsync(
 	sessionId: string,
-	model: string = 'command-a-03-2025'
-): Promise<ChatMessageV2[]> {
+	model: string = 'gpt-4o-mini'
+): Promise<GenericChatMessage[]> {
 	const history = await getChatHistoryAsync(sessionId);
 	return prepareChatHistory(history, model);
 }
@@ -64,7 +66,7 @@ export async function getPreparedChatHistoryAsync(
 /**
  * Set chat history for a session in Supabase (upsert)
  */
-export async function setChatHistoryAsync(sessionId: string, history: ChatMessageV2[]): Promise<void> {
+export async function setChatHistoryAsync(sessionId: string, history: GenericChatMessage[]): Promise<void> {
 	try {
 		const supabase = getSupabaseClient();
 
@@ -101,7 +103,7 @@ export async function setChatHistoryAsync(sessionId: string, history: ChatMessag
  * Synchronous version - no-op, use async version
  * @deprecated Use setChatHistoryAsync instead
  */
-export function setChatHistory(sessionId: string, history: ChatMessageV2[]): void {
+export function setChatHistory(sessionId: string, history: GenericChatMessage[]): void {
 	// Fire and forget - call async version
 	setChatHistoryAsync(sessionId, history).catch((err) => {
 		console.error('Error in setChatHistory fire-and-forget:', err);
@@ -111,7 +113,7 @@ export function setChatHistory(sessionId: string, history: ChatMessageV2[]): voi
 /**
  * Add a message to chat history
  */
-export async function addToChatHistoryAsync(sessionId: string, message: ChatMessageV2): Promise<void> {
+export async function addToChatHistoryAsync(sessionId: string, message: GenericChatMessage): Promise<void> {
 	const history = await getChatHistoryAsync(sessionId);
 	history.push(message);
 	await setChatHistoryAsync(sessionId, history);
@@ -120,7 +122,7 @@ export async function addToChatHistoryAsync(sessionId: string, message: ChatMess
 /**
  * Add multiple messages to chat history
  */
-export async function addMessagesToChatHistoryAsync(sessionId: string, messages: ChatMessageV2[]): Promise<void> {
+export async function addMessagesToChatHistoryAsync(sessionId: string, messages: GenericChatMessage[]): Promise<void> {
 	const history = await getChatHistoryAsync(sessionId);
 	history.push(...messages);
 	await setChatHistoryAsync(sessionId, history);
@@ -192,7 +194,7 @@ export async function cleanupExpiredSessions(): Promise<number> {
 /**
  * Get token usage info for a session's chat history
  */
-export async function getChatHistoryTokenUsageAsync(sessionId: string, model: string = 'command-a-03-2025') {
+export async function getChatHistoryTokenUsageAsync(sessionId: string, model: string = 'gpt-4o-mini') {
 	const history = await getChatHistoryAsync(sessionId);
 	return getTokenUsage(history, model);
 }
@@ -267,7 +269,7 @@ export const CHAT_KEYS = {
 } as const;
 
 /** @deprecated Use getChatHistoryAsync instead */
-export function loadMessages(): ChatMessageV2[] {
+export function loadMessages(): GenericChatMessage[] {
 	return [];
 }
 
@@ -304,8 +306,8 @@ export function getSessionInfo(): null {
 /** @deprecated Use getPreparedChatHistoryAsync */
 export function getPreparedChatHistory(
 	sessionId: string,
-	model: string = 'command-a-03-2025'
-): ChatMessageV2[] {
+	model: string = 'gpt-4o-mini'
+): GenericChatMessage[] {
 	console.warn('getPreparedChatHistory called synchronously - returning empty. Use getPreparedChatHistoryAsync.');
 	return [];
 }

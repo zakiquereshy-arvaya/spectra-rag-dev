@@ -1,4 +1,4 @@
-import { CohereClientV2 } from 'cohere-ai';
+import OpenAI from 'openai';
 
 export interface User {
 	name: string;
@@ -6,14 +6,14 @@ export interface User {
 }
 
 export class CalendarAIHelper {
-	private client: CohereClientV2;
+	private client: OpenAI;
 	private model: string;
 	private readonly minConfidenceName = 0.9;
 	private readonly minConfidenceSender = 0.95;
 
-	constructor(apiKey: string, model: string = 'command-a-03-2025') {
-		this.client = new CohereClientV2({
-			token: apiKey,
+	constructor(apiKey: string, model: string = 'gpt-4o-mini') {
+		this.client = new OpenAI({
+			apiKey: apiKey,
 		});
 		this.model = model;
 	}
@@ -45,7 +45,7 @@ Rules:
 
 Return ONLY valid JSON, no other text.`;
 
-			const response = await this.client.chat({
+			const response = await this.client.chat.completions.create({
 				model: this.model,
 				messages: [
 					{
@@ -58,20 +58,13 @@ Return ONLY valid JSON, no other text.`;
 					},
 				],
 				temperature: 0.1,
-				maxTokens: 200,
+				max_tokens: 200,
 			});
 
 			let resultText = '';
-			const content = response.message?.content;
+			const content = response.choices[0]?.message?.content;
 			if (content) {
-				if (typeof content === 'string') {
-					resultText = (content as string).trim();
-				} else if (Array.isArray(content)) {
-					const textParts: string[] = content
-						.filter((item: any) => item.type === 'text')
-						.map((item: any) => (item.text || '') as string);
-					resultText = textParts.join('').trim();
-				}
+				resultText = content.trim();
 			}
 
 			if (!resultText) {
@@ -175,7 +168,7 @@ CRITICAL:
 Return JSON: {"name": "...", "email": "...", "valid": true/false, "confidence": 0.0-1.0}
 Return ONLY valid JSON, no other text.`;
 
-			const response = await this.client.chat({
+			const response = await this.client.chat.completions.create({
 				model: this.model,
 				messages: [
 					{
@@ -188,20 +181,13 @@ Return ONLY valid JSON, no other text.`;
 					},
 				],
 				temperature: 0.1,
-				maxTokens: 200,
+				max_tokens: 200,
 			});
 
 			let resultText = '';
-			const content = response.message?.content;
+			const content = response.choices[0]?.message?.content;
 			if (content) {
-				if (typeof content === 'string') {
-					resultText = (content as string).trim();
-				} else if (Array.isArray(content)) {
-					const textParts: string[] = content
-						.filter((item: any) => item.type === 'text')
-						.map((item: any) => (item.text || '') as string);
-					resultText = textParts.join('').trim();
-				}
+				resultText = content.trim();
 			}
 
 			if (!resultText) {

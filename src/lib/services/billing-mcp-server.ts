@@ -1,8 +1,8 @@
 // Billing MCP Server - Time Entry Expert for MoE
 // Handles time entry tools: lookup_employee, lookup_customer, list_employees, list_customers, submit_time_entry
 
-import type { ChatMessageV2 } from 'cohere-ai/api';
-import { CohereService } from './cohere';
+import { OpenAIService } from './openai-service';
+import type { GenericChatMessage } from '$lib/utils/tokens';
 import {
 	getEmployeeByName,
 	getCustomerByName,
@@ -16,7 +16,7 @@ import { prepareChatHistory } from '$lib/utils/tokens';
 import { BILLI_DEV_WEBHOOK_URL } from '$env/static/private';
 
 // Extended message type with timestamp for storage
-type StoredChatMessage = ChatMessageV2 & { _timestamp?: string };
+type StoredChatMessage = GenericChatMessage;
 
 export interface BillingMCPRequest {
 	message: string;
@@ -24,7 +24,7 @@ export interface BillingMCPRequest {
 }
 
 export class BillingMCPServer {
-	private cohereService: CohereService;
+	private openaiService: OpenAIService;
 	private sessionId: string;
 	private chatHistory: StoredChatMessage[] = [];
 	private loggedInUser: { name: string; email: string } | null = null;
@@ -37,12 +37,12 @@ export class BillingMCPServer {
 	private cachedCustomers: Customer[] | null = null;
 
 	constructor(
-		cohereApiKey: string,
+		openaiApiKey: string,
 		sessionId: string,
 		loggedInUser?: { name: string; email: string },
 		webhookUrl?: string
 	) {
-		this.cohereService = new CohereService(cohereApiKey);
+		this.openaiService = new OpenAIService(openaiApiKey);
 		this.sessionId = sessionId;
 		this.loggedInUser = loggedInUser || null;
 		this.webhookUrl = webhookUrl || BILLI_DEV_WEBHOOK_URL;
@@ -68,7 +68,7 @@ export class BillingMCPServer {
 	/**
 	 * Add message(s) to chat history with timestamp
 	 */
-	private pushToHistory(...messages: ChatMessageV2[]): void {
+	private pushToHistory(...messages: GenericChatMessage[]): void {
 		for (const msg of messages) {
 			const now = Date.now();
 			const timestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1;
@@ -455,7 +455,7 @@ export class BillingMCPServer {
 		try {
 			await this.loadHistory();
 
-			const tools = CohereService.createTimeEntryTools();
+			const tools = OpenAIService.createTimeEntryTools();
 			const preparedHistory = prepareChatHistory(this.chatHistory);
 
 			// Get current date info for the AI
@@ -465,7 +465,7 @@ export class BillingMCPServer {
 			const formattedDate = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' });
 
 			// Add system context for billing
-			const systemMessage: ChatMessageV2 = {
+			const systemMessage: GenericChatMessage = {
 				role: 'system',
 				content: `You are Billi, an AI assistant for Arvaya time tracking.
 
@@ -532,8 +532,8 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 				let fullText = '';
 				const toolCalls: any[] = [];
 
-				// Call Cohere and collect response WITHOUT yielding text
-				for await (const chunk of this.cohereService.chatStream(
+				// Call OpenAI and collect response WITHOUT yielding text
+				for await (const chunk of this.openaiService.chatStream(
 					currentMessage,
 					tools,
 					[systemMessage, ...preparedHistory],
@@ -591,9 +591,8 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 				}
 
 				// Tool calls present - execute them silently
-				// Note: Cohere API doesn't allow both content and toolCalls in the same message
-				const assistantMessage: ChatMessageV2 = { role: 'assistant' };
-				// Don't set content when toolCalls are present - Cohere API constraint
+				const assistantMessage: GenericChatMessage = { role: 'assistant' };
+				// Set content if any, and add tool calls
 				assistantMessage.toolCalls = toolCalls.map((tc) => ({
 					id: tc.id,
 					type: 'function' as const,
@@ -602,7 +601,7 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 				this.pushToHistory(assistantMessage);
 
 				// Execute tools
-				const toolResults: ChatMessageV2[] = [];
+				const toolResults: GenericChatMessage[] = [];
 				for (const toolCall of toolCalls) {
 					try {
 						console.log(`[BillingMCP] Executing tool: ${toolCall.name}`, toolCall.parameters);
