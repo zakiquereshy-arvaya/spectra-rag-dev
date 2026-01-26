@@ -190,10 +190,10 @@ Return ONLY the JSON classification.`;
 			/\b\d+(\.\d+)?\s*(hours?|hrs?)\b/.test(lower) ||
 			/\b(customer|client|tasks?|description|worked)\b/i.test(lower);
 
-		const appointmentIndicators = /availability|available|free|open|schedule|booking|book|calendar|meeting/;
-		const hasAppointmentIndicators = appointmentIndicators.test(lower);
+		const schedulingIndicators = /availability|available|free|open|schedule|booking|book|calendar/;
+		const hasSchedulingIndicators = schedulingIndicators.test(lower);
 
-		if (hasTimeEntryIndicators && hasAppointmentIndicators) {
+		if (hasTimeEntryIndicators && hasSchedulingIndicators) {
 			return {
 				category: 'general',
 				confidence: 0.9,
