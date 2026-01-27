@@ -132,6 +132,20 @@ export class MCPServer {
 		return parsedDate.toISOString().split('T')[0];
 	}
 
+	private getEasternOffset(dateStr: string): string {
+		const probe = new Date(`${dateStr}T12:00:00Z`);
+		const parts = new Intl.DateTimeFormat('en-US', {
+			timeZone: 'America/New_York',
+			timeZoneName: 'shortOffset',
+		}).formatToParts(probe);
+		const tz = parts.find((part) => part.type === 'timeZoneName')?.value || 'GMT-05:00';
+		const match = tz.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/);
+		if (!match) return '-05:00';
+		const hours = match[1].padStart(3, '0');
+		const minutes = match[2] ? match[2] : '00';
+		return `${hours}:${minutes}`;
+	}
+
 	
 	private convertToLocalTime(utcDateTime: string): string {
 		// Graph API returns datetime WITHOUT 'Z' suffix, but times are in UTC
@@ -400,6 +414,7 @@ export class MCPServer {
 					// Parse natural language date (handles "next monday", "tomorrow", etc.)
 					const parsedDate = this.parseDate(date);
 					this.lastAvailabilityDate = parsedDate;
+					const easternOffset = this.getEasternOffset(parsedDate);
 					
 					// Create datetime range for the full day in EST/EDT timezone
 					// Convert local midnight to UTC for the query
@@ -434,8 +449,8 @@ export class MCPServer {
 
 					const availableSlots = await this.graphService.getAvailableSlotsForUser(
 						userEmail,
-						`${parsedDate}T09:00:00`,
-						`${parsedDate}T17:00:00`,
+						`${parsedDate}T08:00:00${easternOffset}`,
+						`${parsedDate}T17:00:00${easternOffset}`,
 						durationMinutes,
 						'Eastern Standard Time'
 					);
@@ -503,8 +518,9 @@ export class MCPServer {
 					}
 
 					const parsedDate = this.parseDate(date);
-					const startDateTime = `${parsedDate}T09:00:00`;
-					const endDateTime = `${parsedDate}T17:00:00`;
+					const easternOffset = this.getEasternOffset(parsedDate);
+					const startDateTime = `${parsedDate}T08:00:00${easternOffset}`;
+					const endDateTime = `${parsedDate}T17:00:00${easternOffset}`;
 					const timeZone = 'Eastern Standard Time';
 
 					const availableSlots = await this.graphService.getAvailableSlotsForUser(
