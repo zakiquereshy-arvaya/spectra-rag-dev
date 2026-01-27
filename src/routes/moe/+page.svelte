@@ -233,9 +233,9 @@ Just tell me what you need!`,
 	let modeConfig = $derived(getModeConfig(currentMode));
 </script>
 
-<div class="flex flex-col h-screen bg-slate-950">
+<div class="flex flex-col h-screen">
 	<!-- Header -->
-	<header class="bg-slate-900/80 backdrop-blur-sm border-b border-slate-800 px-6 py-4 sticky top-0 z-10">
+	<header class="glass sticky top-0 z-10 px-6 py-4">
 		<div class="max-w-4xl mx-auto flex justify-between items-center">
 			<div class="flex items-center gap-4">
 				<div class="flex items-center gap-3">
@@ -251,7 +251,7 @@ Just tell me what you need!`,
 				</div>
 
 				{#if isLoading}
-					<div class="flex items-center gap-2 px-3 py-1.5 rounded-full border {modeConfig.color} text-xs font-medium">
+					<div class="flex items-center gap-2 px-3 py-1.5 rounded-full border {modeConfig.color} text-xs font-medium animate-fade-in">
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={modeConfig.icon}></path>
 						</svg>
@@ -265,7 +265,7 @@ Just tell me what you need!`,
 
 			<button
 				onclick={handleClearChat}
-				class="px-3 py-1.5 text-sm text-slate-400 hover:text-red-400 border border-slate-700 hover:border-red-500/50 rounded-lg transition-colors"
+				class="px-3 py-1.5 text-sm text-slate-400 hover:text-red-400 glass hover:border-red-500/50 rounded-lg transition-colors btn-press"
 			>
 				Clear Chat
 			</button>
@@ -290,11 +290,11 @@ Just tell me what you need!`,
 
 				{#if streamingContent}
 					<div class="py-3">
-						<div class="bg-slate-800/50 border border-slate-700 rounded-xl px-5 py-4 text-slate-200">
-							<div class="prose prose-invert prose-sm max-w-none whitespace-pre-wrap">
+						<div class="glass-light rounded-2xl px-5 py-4 text-slate-200">
+							<div class="prose-chat text-sm max-w-none whitespace-pre-wrap">
 								{streamingContent}
 							</div>
-							<span class="inline-block w-2 h-5 bg-amber-500 animate-pulse ml-1 rounded-sm"></span>
+							<span class="inline-block w-2 h-5 bg-amber-500 rounded-full animate-pulse ml-1"></span>
 						</div>
 					</div>
 				{/if}
@@ -303,7 +303,7 @@ Just tell me what you need!`,
 	</div>
 
 	<!-- Input -->
-	<div class="bg-slate-900/80 backdrop-blur-sm border-t border-slate-800 px-6 py-4">
+	<div class="glass px-6 py-4">
 		<div class="max-w-4xl mx-auto">
 			<div class="flex gap-3">
 				<div class="flex-1 relative">
@@ -312,10 +312,10 @@ Just tell me what you need!`,
 						bind:value={inputMessage}
 						onkeydown={handleKeyDown}
 						placeholder="Ask Billi anything..."
-						class="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl
+						class="w-full px-4 py-3 glass-input rounded-xl
 						       text-white placeholder-slate-500
-						       focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50
-						       resize-none transition-all"
+						       focus:outline-none
+						       resize-none"
 						rows="2"
 						disabled={isLoading || isLoadingHistory}
 					></textarea>
@@ -327,7 +327,7 @@ Just tell me what you need!`,
 					       hover:from-amber-400 hover:to-orange-500
 					       disabled:opacity-50 disabled:cursor-not-allowed
 					       focus:outline-none focus:ring-2 focus:ring-amber-500/50
-					       transition-all self-end shadow-lg shadow-amber-500/20"
+					       transition-all self-end shadow-lg shadow-amber-500/20 btn-press btn-glow"
 				>
 					{#if isLoading}
 						<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

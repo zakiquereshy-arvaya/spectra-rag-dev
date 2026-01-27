@@ -20,7 +20,7 @@
 	let isLoadingHistory = $state(true);
 	let sessionId = $state('');
 	let mounted = $state(false);
-	
+
 	// Separate state for streaming content - displayed inline
 	let streamingContent = $state('');
 
@@ -31,7 +31,7 @@
 	const welcomeMessage: ChatMessage = {
 		role: 'assistant',
 		content:
-			'Hello! I can help you book appointments using your Microsoft Calendar. You can ask me to:\n\n• Find available time slots\n• Book an appointment\n• View your calendar events\n• List your calendars\n\nHow can I help you today?',
+			'Hello! I can help you book appointments using your Microsoft Calendar. You can ask me to:\n\n\u2022 Find available time slots\n\u2022 Book an appointment\n\u2022 View your calendar events\n\u2022 List your calendars\n\nHow can I help you today?',
 		timestamp: new Date().toISOString(),
 	};
 
@@ -173,7 +173,7 @@
 			streamingContent = '';
 		} catch (error: any) {
 			streamingContent = '';
-			
+
 			// Don't show error if request was aborted
 			if (error instanceof Error && error.name === 'AbortError') {
 				return;
@@ -199,23 +199,21 @@
 	}
 </script>
 
-<div class="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
+<div class="flex flex-col h-screen">
 	<!-- Header -->
-	<header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+	<header class="glass sticky top-0 z-10 px-6 py-4">
 		<div class="max-w-4xl mx-auto flex justify-between items-start">
 			<div>
-				<h1 class="text-2xl font-bold text-gray-900 dark:text-white">
+				<h1 class="text-2xl font-bold text-white">
 					Appointment Booking Assistant
 				</h1>
-				<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+				<p class="text-sm text-slate-500 mt-1">
 					Powered by Microsoft Graph & Cohere Command
 				</p>
 			</div>
 			<button
 				onclick={handleClearChat}
-				class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400
-				       border border-gray-300 dark:border-gray-600 rounded-lg hover:border-red-300 dark:hover:border-red-600
-				       transition-colors"
+				class="px-3 py-1.5 text-sm text-slate-400 hover:text-red-400 glass hover:border-red-500/50 rounded-lg transition-colors btn-press"
 				title="Clear chat history"
 			>
 				Clear Chat
@@ -228,21 +226,21 @@
 		<div class="max-w-4xl mx-auto">
 			{#if isLoadingHistory}
 				<div class="flex items-center justify-center py-8">
-					<svg class="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+					<svg class="animate-spin h-8 w-8 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
 						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
 						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 					</svg>
-					<span class="ml-2 text-gray-500 dark:text-gray-400">Loading conversation...</span>
+					<span class="ml-2 text-slate-400">Loading conversation...</span>
 				</div>
 			{:else}
 				<MessageList {messages} />
-				
+
 				<!-- Streaming content displayed separately -->
 				{#if streamingContent}
 					<div class="py-2">
-						<div class="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3 text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
+						<div class="glass-light rounded-2xl px-4 py-3 text-slate-100 whitespace-pre-wrap">
 							{streamingContent}
-							<span class="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1"></span>
+							<span class="inline-block w-2 h-4 bg-amber-500 rounded-full animate-pulse ml-1"></span>
 						</div>
 					</div>
 				{/if}
@@ -251,7 +249,7 @@
 	</div>
 
 	<!-- Input -->
-	<div class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4">
+	<div class="glass px-6 py-4">
 		<div class="max-w-4xl mx-auto">
 			<div class="flex gap-4">
 				<div class="flex-1 relative">
@@ -259,9 +257,9 @@
 						bind:value={inputMessage}
 						onkeydown={handleKeyDown}
 						placeholder="Ask me to book an appointment, find available slots, or view your calendar..."
-						class="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-600 rounded-lg
-						       bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-						       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+						class="w-full px-4 py-3 pr-12 glass-input rounded-xl
+						       text-white placeholder-slate-500
+						       focus:outline-none
 						       resize-none"
 						rows="3"
 						disabled={isLoading || isLoadingHistory}
@@ -270,10 +268,11 @@
 				<button
 					onclick={sendMessage}
 					disabled={isLoading || isLoadingHistory || !inputMessage.trim()}
-					class="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold
-					       hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-					       disabled:opacity-50 disabled:cursor-not-allowed transition-colors
-					       self-end"
+					class="px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-semibold
+					       hover:from-amber-400 hover:to-orange-500
+					       disabled:opacity-50 disabled:cursor-not-allowed
+					       focus:outline-none focus:ring-2 focus:ring-amber-500/50
+					       transition-all self-end btn-press btn-glow"
 				>
 					{#if isLoading}
 						<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -285,7 +284,7 @@
 					{/if}
 				</button>
 			</div>
-			<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+			<p class="text-xs text-slate-600 mt-2">
 				Press Enter to send, Shift+Enter for new line
 			</p>
 		</div>

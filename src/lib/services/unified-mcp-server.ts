@@ -969,7 +969,7 @@ export class UnifiedMCPServer {
 			  - You may ask at most one short clarifying question only when a REQUIRED field is truly missing (e.g., no meeting subject).
 			  - When you ask a yes/no question (e.g., "Would you like me to list all customers?"), a "yes" reply MUST trigger that action. Do not repeat the same error message.
 			  - Do NOT ask the user for email addresses you can infer from names or from the logged-in user info. Pass names and let the backend resolve them.
-			  - WHEN AN APPOINTMENT IS BOOKED, YOU MUST NOT LOG TIME FOR IT, BECAUSE IT IS IN THE FUTURE AND WE ARE NOT YET BILLED FOR IT.
+			  - WHEN AN APPOINTMENT IS BOOKED, YOU MUST NOT LOG TIME FOR IT, NOT TRIGGER THE TIME ENTRY TOOL, BECAUSE IT IS IN THE FUTURE AND WE ARE NOT YET BILLED FOR IT.
 			  
 			  CALENDAR & MEETINGS
 			  - You can:
@@ -1007,7 +1007,7 @@ export class UnifiedMCPServer {
 				 - hours (positive number)
 				 - entry_date (YYYY-MM-DD; "today" = ${todayStr} unless user specifies another date)
 				 - billable (true/false) ALL LOGS FOR ICE IS BILLABLE
-				 - billable is ALWAYS FALSE FOR ARVAYA INTERNAL/ARVAYA CONSULTING/ANYTHING ARVAYA
+				 - billable is ALWAYS FALSE FOR ARVAYA INTERNAL/ARVAYA CONSULTING/ANYTHING ARVAYA INTERNAL WORK IS NOT BILLABLE
 			  4. ONLY AFTER the submission tool returns success=true may you confirm to the user, e.g.:
 				 - "Logged 2 hours for Infrastructure Consulting & Engineering for today: API work."
 			  

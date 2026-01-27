@@ -41,7 +41,7 @@
 	<div
 		role="button"
 		tabindex="0"
-		class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden transition-opacity"
+		class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
 		onclick={() => (isOpen = false)}
 		onkeydown={(e) => {
 			if (e.key === 'Enter' || e.key === ' ') {
@@ -54,20 +54,20 @@
 
 <!-- Sidebar -->
 <aside
-	class="fixed top-0 left-0 h-full w-72 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800
+	class="fixed top-0 left-0 h-full w-72 glass-sidebar
 	       shadow-2xl transform transition-transform duration-300 ease-in-out z-50
 	       {isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0"
 >
 	<div class="flex flex-col h-full">
 		<!-- Header with Logo -->
-		<div class="p-6 border-b border-slate-700/50">
+		<div class="p-6 border-b border-white/[0.06]">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-3">
 					<img src={ArvayaLogo} alt="Arvaya" class="h-10 w-auto" />
 				</div>
 				<button
 					onclick={() => (isOpen = false)}
-					class="lg:hidden p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-colors"
+					class="lg:hidden p-2 text-slate-400 hover:text-white hover:bg-white/[0.04] rounded-lg transition-colors btn-press"
 					aria-label="Close sidebar"
 				>
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -90,22 +90,25 @@
 						<li>
 							<button
 								onclick={() => handleNavigate(item.href)}
-								class="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all duration-200
+								class="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all duration-200 btn-press
 								       {isActive(item.href)
 										? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 shadow-lg shadow-amber-500/10 border border-amber-500/20'
 										: item.primary
-											? 'text-slate-200 hover:bg-slate-700/50 hover:text-amber-400'
-											: 'text-slate-300 hover:bg-slate-700/50 hover:text-white'}"
+											? 'text-slate-200 hover:bg-white/[0.04] hover:text-amber-400'
+											: 'text-slate-300 hover:bg-white/[0.04] hover:text-white'}"
 							>
-								<div class="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center
+								<div class="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center relative
 								            {isActive(item.href)
 											? 'bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-amber-500/30'
 											: item.primary
 												? 'bg-gradient-to-br from-amber-500/20 to-orange-600/20 text-amber-400'
-												: 'bg-slate-700/50 text-slate-400'}">
+												: 'bg-white/[0.04] text-slate-400'}">
 									<svg class="w-5 h-5 {isActive(item.href) ? 'text-white' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={item.icon}></path>
 									</svg>
+									{#if isActive(item.href)}
+										<span class="absolute -right-1 -top-1 w-2.5 h-2.5 rounded-full bg-amber-400 animate-glow-pulse"></span>
+									{/if}
 								</div>
 								<div>
 									<p class="font-medium">{item.label}</p>
@@ -127,14 +130,19 @@
 						<li>
 							<button
 								onclick={() => handleNavigate(item.href)}
-								class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-200
+								class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-200 btn-press
 								       {isActive(item.href)
-										? 'bg-slate-700/70 text-white'
-										: 'text-slate-400 hover:bg-slate-700/30 hover:text-slate-200'}"
+										? 'bg-white/[0.06] text-white'
+										: 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'}"
 							>
-								<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={item.icon}></path>
-								</svg>
+								<div class="relative">
+									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={item.icon}></path>
+									</svg>
+									{#if isActive(item.href)}
+										<span class="absolute -right-1.5 -top-1.5 w-2 h-2 rounded-full bg-amber-400 animate-glow-pulse"></span>
+									{/if}
+								</div>
 								<span class="text-sm">{item.label}</span>
 							</button>
 						</li>
@@ -144,7 +152,7 @@
 		</nav>
 
 		<!-- User Section -->
-		<div class="p-4 border-t border-slate-700/50 bg-slate-800/50">
+		<div class="p-4 border-t border-white/[0.06] bg-white/[0.02]">
 			{#if session?.user}
 				<div class="flex items-center gap-3 mb-3">
 					<div class="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white font-semibold shadow-lg shadow-amber-500/20">
@@ -161,7 +169,7 @@
 				</div>
 				<button
 					onclick={() => signOut()}
-					class="w-full px-4 py-2 text-sm text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all duration-200 flex items-center justify-center gap-2"
+					class="w-full px-4 py-2 text-sm text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 btn-press"
 				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
