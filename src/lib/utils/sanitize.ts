@@ -35,10 +35,10 @@ export function formatMessageWithMarkdown(content: string): string {
 	let formatted = escapeHtml(content);
 
 	// Convert code blocks (```code```) - must be done before inline code
-	formatted = formatted.replace(/```([\s\S]*?)```/g, '<pre class="bg-gray-200 dark:bg-gray-700 p-2 rounded my-2 overflow-x-auto"><code>$1</code></pre>');
+	formatted = formatted.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
 
 	// Convert inline code (`code`)
-	formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">$1</code>');
+	formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
 
 	// Convert bold (**text**)
 	formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');

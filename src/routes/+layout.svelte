@@ -11,15 +11,15 @@
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
-<div class="flex min-h-screen">
+<div class="flex min-h-screen mesh-gradient-subtle dot-pattern">
 	<Sidebar bind:isOpen={sidebarOpen} session={data.session} />
-	
+
 	<!-- Main Content -->
 	<main class="flex-1 lg:ml-72">
 		<!-- Mobile menu button -->
 		<button
 			onclick={() => (sidebarOpen = true)}
-			class="lg:hidden fixed top-4 left-4 z-30 p-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+			class="lg:hidden fixed top-4 left-4 z-30 p-2 glass rounded-lg text-slate-300 hover:text-white btn-press transition-colors"
 			aria-label="Open menu"
 		>
 			<svg
@@ -36,7 +36,7 @@
 				></path>
 			</svg>
 		</button>
-		
+
 		{@render children()}
 	</main>
 </div>

@@ -44,33 +44,33 @@
 	];
 </script>
 
-<div class="min-h-screen bg-slate-950">
+<div class="min-h-screen">
 	<!-- Hero Section -->
 	<section class="relative overflow-hidden">
 		<!-- Background Pattern -->
-		<div class="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900"></div>
-		<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-500/10 via-transparent to-transparent"></div>
-		<div class="absolute inset-0" style="background-image: url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%22%23ffffff%22 fill-opacity=%220.02%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E');"></div>
+		<div class="absolute inset-0 mesh-gradient"></div>
+		<div class="absolute inset-0 dot-pattern"></div>
 
 		<div class="relative px-6 py-20 lg:py-32">
 			<div class="max-w-5xl mx-auto">
 				{#if !data.session}
 					<!-- Login State -->
 					<div class="text-center">
-						<div class="flex justify-center mb-8">
+						<div class="flex justify-center mb-8 animate-fade-in-up">
 							<img src={ArvayaLogo} alt="Arvaya" class="h-16 md:h-20" />
 						</div>
-						<h1 class="text-4xl lg:text-6xl font-bold text-white mb-6">
+						<h1 class="text-4xl lg:text-6xl font-bold text-white mb-6 animate-fade-in-up" style="animation-delay: 0.1s">
 							Developer Portal
 						</h1>
-						<p class="text-lg text-slate-400 mb-10 max-w-xl mx-auto">
+						<p class="text-lg text-slate-400 mb-10 max-w-xl mx-auto animate-fade-in-up" style="animation-delay: 0.2s">
 							Internal tools and AI assistants for the Arvaya team
 						</p>
 						<button
 							onclick={() => signIn('microsoft-entra-id')}
 							class="inline-flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-semibold text-lg
-							       hover:from-amber-400 hover:to-orange-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-slate-950
-							       transition-all duration-200 shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/30"
+							       hover:from-amber-400 hover:to-orange-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-surface
+							       transition-all duration-200 shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/30 btn-press btn-glow animate-fade-in-up"
+							style="animation-delay: 0.3s"
 						>
 							<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
 								<path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z"/>
@@ -81,26 +81,27 @@
 				{:else}
 					<!-- Authenticated State -->
 					<div class="text-center mb-16">
-						<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium mb-6">
+						<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium mb-6 animate-fade-in-up">
 							<span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
 							Welcome back, {data.session.user?.name?.split(' ')[0] || 'Developer'}
 						</div>
-						<h1 class="text-4xl lg:text-5xl font-bold text-white mb-4">
+						<h1 class="text-4xl lg:text-5xl font-bold text-white mb-4 animate-fade-in-up" style="animation-delay: 0.1s">
 							Arvaya Developer Portal
 						</h1>
-						<p class="text-lg text-slate-400 max-w-2xl mx-auto">
+						<p class="text-lg text-slate-400 max-w-2xl mx-auto animate-fade-in-up" style="animation-delay: 0.2s">
 							Your hub for AI-powered tools and automation. Select a tool below to get started.
 						</p>
 					</div>
 
 					<!-- Tools Grid -->
 					<div class="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-						{#each tools as tool}
+						{#each tools as tool, i}
 							<button
 								onclick={() => goto(tool.href)}
-								class="group relative p-6 rounded-2xl bg-slate-900/50 border border-slate-800 hover:border-slate-700
-								       text-left transition-all duration-300 hover:shadow-2xl hover:-translate-y-1
+								class="group relative p-6 rounded-2xl glass card-hover
+								       text-left animate-fade-in-up
 								       {tool.primary ? 'md:col-span-2' : ''}"
+								style="animation-delay: {0.3 + i * 0.1}s"
 							>
 								<!-- Hover gradient overlay -->
 								<div class="absolute inset-0 rounded-2xl bg-gradient-to-br {tool.bgGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -131,7 +132,7 @@
 									</div>
 
 									<!-- Arrow -->
-									<div class="flex-shrink-0 w-10 h-10 rounded-full bg-slate-800 group-hover:bg-slate-700 flex items-center justify-center transition-colors">
+									<div class="flex-shrink-0 w-10 h-10 rounded-full bg-white/[0.04] group-hover:bg-white/[0.08] flex items-center justify-center transition-colors">
 										<svg class="w-5 h-5 text-slate-500 group-hover:text-white transition-colors transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
 										</svg>
@@ -147,13 +148,13 @@
 
 	{#if data.session}
 		<!-- Quick Stats Section -->
-		<section class="px-6 py-16 border-t border-slate-800">
+		<section class="px-6 py-16 border-t border-white/[0.06]">
 			<div class="max-w-4xl mx-auto">
 				<h2 class="text-2xl font-bold text-white mb-8 text-center">Quick Actions</h2>
 				<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
 					<button
 						onclick={() => goto('/moe')}
-						class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/50 transition-all group"
+						class="p-4 rounded-xl glass card-hover group"
 					>
 						<div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center mb-3 group-hover:bg-amber-500/20 transition-colors">
 							<svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -166,7 +167,7 @@
 
 					<button
 						onclick={() => goto('/moe')}
-						class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-sky-500/50 hover:bg-slate-800/50 transition-all group"
+						class="p-4 rounded-xl glass card-hover group"
 					>
 						<div class="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center mb-3 group-hover:bg-sky-500/20 transition-colors">
 							<svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -179,7 +180,7 @@
 
 					<button
 						onclick={() => goto('/moe')}
-						class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-800/50 transition-all group"
+						class="p-4 rounded-xl glass card-hover group"
 					>
 						<div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:bg-emerald-500/20 transition-colors">
 							<svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -192,7 +193,7 @@
 
 					<button
 						onclick={() => goto('/spectra-job')}
-						class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-violet-500/50 hover:bg-slate-800/50 transition-all group"
+						class="p-4 rounded-xl glass card-hover group"
 					>
 						<div class="w-10 h-10 rounded-lg bg-violet-500/10 flex items-center justify-center mb-3 group-hover:bg-violet-500/20 transition-colors">
 							<svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -208,7 +209,7 @@
 	{/if}
 
 	<!-- Footer -->
-	<footer class="px-6 py-8 border-t border-slate-800">
+	<footer class="px-6 py-8 border-t border-white/[0.06]">
 		<div class="max-w-4xl mx-auto text-center">
 			<p class="text-sm text-slate-500">
 				Arvaya AI & Automations Consulting

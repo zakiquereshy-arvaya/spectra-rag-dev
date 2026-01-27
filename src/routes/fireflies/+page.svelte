@@ -210,9 +210,9 @@ Just ask me anything about your meetings!`,
 	}
 </script>
 
-<div class="flex flex-col h-screen bg-slate-950">
+<div class="flex flex-col h-screen">
 	<!-- Header -->
-	<header class="bg-slate-900/80 backdrop-blur-sm border-b border-slate-800 px-6 py-4 sticky top-0 z-10">
+	<header class="glass sticky top-0 z-10 px-6 py-4">
 		<div class="max-w-4xl mx-auto flex justify-between items-center">
 			<div class="flex items-center gap-4">
 				<div class="flex items-center gap-3">
@@ -228,7 +228,7 @@ Just ask me anything about your meetings!`,
 				</div>
 
 				{#if isLoading}
-					<div class="flex items-center gap-2 px-3 py-1.5 rounded-full border text-purple-400 bg-purple-500/10 border-purple-500/20 text-xs font-medium">
+					<div class="flex items-center gap-2 px-3 py-1.5 rounded-full border text-purple-400 bg-purple-500/10 border-purple-500/20 text-xs font-medium animate-fade-in">
 						<svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
 							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -242,7 +242,7 @@ Just ask me anything about your meetings!`,
 				{#if currentSources.length > 0}
 					<button
 						onclick={() => showSources = !showSources}
-						class="px-3 py-1.5 text-sm text-purple-400 hover:text-purple-300 border border-purple-500/30 hover:border-purple-500/50 rounded-lg transition-colors flex items-center gap-1.5"
+						class="px-3 py-1.5 text-sm text-purple-400 hover:text-purple-300 glass hover:border-purple-500/30 rounded-lg transition-colors flex items-center gap-1.5 btn-press"
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -252,7 +252,7 @@ Just ask me anything about your meetings!`,
 				{/if}
 				<button
 					onclick={handleClearChat}
-					class="px-3 py-1.5 text-sm text-slate-400 hover:text-red-400 border border-slate-700 hover:border-red-500/50 rounded-lg transition-colors"
+					class="px-3 py-1.5 text-sm text-slate-400 hover:text-red-400 glass hover:border-red-500/50 rounded-lg transition-colors btn-press"
 				>
 					Clear Chat
 				</button>
@@ -262,12 +262,12 @@ Just ask me anything about your meetings!`,
 
 	<!-- Sources Panel (collapsible) -->
 	{#if showSources && currentSources.length > 0}
-		<div class="bg-slate-900/50 border-b border-slate-800 px-6 py-4">
+		<div class="glass border-b border-white/[0.06] px-6 py-4 animate-fade-in">
 			<div class="max-w-4xl mx-auto">
 				<h3 class="text-sm font-medium text-slate-400 mb-3">Referenced Meetings</h3>
 				<div class="grid gap-2">
 					{#each currentSources.slice(0, 5) as source}
-						<div class="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+						<div class="glass-light rounded-lg p-3">
 							<div class="flex items-start justify-between gap-3">
 								<div class="flex-1 min-w-0">
 									<h4 class="text-sm font-medium text-white truncate">{source.title}</h4>
@@ -322,18 +322,18 @@ Just ask me anything about your meetings!`,
 
 				{#if streamingContent}
 					<div class="py-3">
-						<div class="bg-slate-800/50 border border-slate-700 rounded-xl px-5 py-4 text-slate-200">
-							<div class="prose prose-invert prose-sm max-w-none whitespace-pre-wrap">
+						<div class="glass-light rounded-2xl px-5 py-4 text-slate-200">
+							<div class="prose-chat text-sm max-w-none whitespace-pre-wrap">
 								{streamingContent}
 							</div>
-							<span class="inline-block w-2 h-5 bg-purple-500 animate-pulse ml-1 rounded-sm"></span>
+							<span class="inline-block w-2 h-5 bg-purple-500 rounded-full animate-pulse ml-1"></span>
 						</div>
 					</div>
 				{/if}
 
 				<!-- Suggestions based on action items -->
 				{#if currentSuggestions.length > 0 && !isLoading}
-					<div class="mt-4 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+					<div class="mt-4 p-4 glass rounded-xl animate-fade-in">
 						<h4 class="text-sm font-medium text-indigo-400 mb-2 flex items-center gap-2">
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
@@ -352,7 +352,7 @@ Just ask me anything about your meetings!`,
 	</div>
 
 	<!-- Input -->
-	<div class="bg-slate-900/80 backdrop-blur-sm border-t border-slate-800 px-6 py-4">
+	<div class="glass px-6 py-4">
 		<div class="max-w-4xl mx-auto">
 			<div class="flex gap-3">
 				<div class="flex-1 relative">
@@ -361,10 +361,10 @@ Just ask me anything about your meetings!`,
 						bind:value={inputMessage}
 						onkeydown={handleKeyDown}
 						placeholder="Ask about your meetings..."
-						class="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl
+						class="w-full px-4 py-3 glass-input rounded-xl
 						       text-white placeholder-slate-500
-						       focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50
-						       resize-none transition-all"
+						       focus:outline-none
+						       resize-none"
 						rows="2"
 						disabled={isLoading || isLoadingHistory}
 					></textarea>
@@ -376,7 +376,7 @@ Just ask me anything about your meetings!`,
 					       hover:from-purple-400 hover:to-indigo-500
 					       disabled:opacity-50 disabled:cursor-not-allowed
 					       focus:outline-none focus:ring-2 focus:ring-purple-500/50
-					       transition-all self-end shadow-lg shadow-purple-500/20"
+					       transition-all self-end shadow-lg shadow-purple-500/20 btn-press"
 				>
 					{#if isLoading}
 						<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
