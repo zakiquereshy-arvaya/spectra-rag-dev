@@ -139,11 +139,12 @@ export class MCPServer {
 			timeZoneName: 'shortOffset',
 		}).formatToParts(probe);
 		const tz = parts.find((part) => part.type === 'timeZoneName')?.value || 'GMT-05:00';
-		const match = tz.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/);
+		const match = tz.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
 		if (!match) return '-05:00';
-		const hours = match[1].padStart(3, '0');
-		const minutes = match[2] ? match[2] : '00';
-		return `${hours}:${minutes}`;
+		const sign = match[1];
+		const hours = match[2].padStart(2, '0');
+		const minutes = (match[3] ?? '00').padStart(2, '0');
+		return `${sign}${hours}:${minutes}`;
 	}
 
 	
