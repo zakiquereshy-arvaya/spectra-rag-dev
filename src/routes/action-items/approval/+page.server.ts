@@ -5,7 +5,7 @@ import {
 	getApproval,
 	type ActionItem,
 } from '$lib/services/action-items-approval-store';
-import { ACTION_ITEMS_APPROVAL_WEBHOOK_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 
 const buildApprovedItems = (items: ActionItem[], formData: FormData) =>
 	items.map((item, index) => {
@@ -57,13 +57,14 @@ export const actions: Actions = {
 			return fail(404, { error: 'Approval request not found or expired.' });
 		}
 
-		if (!ACTION_ITEMS_APPROVAL_WEBHOOK_URL) {
+		const webhookUrl = env.ACTION_ITEMS_APPROVAL_WEBHOOK_URL;
+		if (!webhookUrl) {
 			return fail(500, { error: 'Approval webhook URL is not configured.' });
 		}
 
 		const approvedItems = buildApprovedItems(approval.actionItems, formData);
 
-		const response = await event.fetch(ACTION_ITEMS_APPROVAL_WEBHOOK_URL, {
+		const response = await event.fetch(webhookUrl, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ approved_items: approvedItems }),
