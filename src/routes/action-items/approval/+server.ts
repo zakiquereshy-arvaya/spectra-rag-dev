@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { setApproval } from '$lib/services/action-items-approval-store';
+import { createApproval } from '$lib/services/action-items-approval-api';
 
 export const POST: RequestHandler = async (event) => {
 	let payload: {
@@ -15,26 +15,17 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Invalid JSON body' }, { status: 400 });
 	}
 
-	const actionItems = Array.isArray(payload?.action_items) ? payload?.action_items : null;
-	const workflowExecutionId = payload?.workflow_execution_id?.toString().trim();
-	const goal = payload?.goal?.toString().trim();
-
-	if (!workflowExecutionId) {
-		return json({ error: 'workflow_execution_id is required' }, { status: 400 });
+	const created = createApproval(payload);
+	if (!created.ok) {
+		return json({ error: created.error }, { status: created.status });
 	}
-
-	if (!actionItems || actionItems.length === 0) {
-		return json({ error: 'action_items array is required' }, { status: 400 });
-	}
-
-	setApproval(workflowExecutionId, actionItems, goal);
 
 	const approvalUrl = new URL('/action-items/approval', event.url);
-	approvalUrl.searchParams.set('workflow_execution_id', workflowExecutionId);
+	approvalUrl.searchParams.set('workflow_execution_id', created.workflowExecutionId);
 
 	return json({
 		ok: true,
-		workflow_execution_id: workflowExecutionId,
+		workflow_execution_id: created.workflowExecutionId,
 		approval_url: approvalUrl.toString(),
 	});
 };

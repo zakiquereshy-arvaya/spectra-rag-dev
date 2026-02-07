@@ -1,10 +1,11 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { fail, json, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
 	deleteApproval,
 	getApproval,
 	type ActionItem,
 } from '$lib/services/action-items-approval-store';
+import { createApproval } from '$lib/services/action-items-approval-api';
 import { env } from '$env/dynamic/private';
 
 const buildApprovedItems = (items: ActionItem[], formData: FormData) =>
@@ -44,6 +45,35 @@ export const load: PageServerLoad = ({ url }) => {
 
 export const actions: Actions = {
 	default: async (event) => {
+		const contentType = event.request.headers.get('content-type') ?? '';
+		if (contentType.includes('application/json')) {
+			let payload: {
+				action_items?: unknown;
+				workflow_execution_id?: string;
+				goal?: string;
+			} | null = null;
+
+			try {
+				payload = await event.request.json();
+			} catch {
+				return json({ error: 'Invalid JSON body' }, { status: 400 });
+			}
+
+			const created = createApproval(payload);
+			if (!created.ok) {
+				return json({ error: created.error }, { status: created.status });
+			}
+
+			const approvalUrl = new URL('/action-items/approval', event.url);
+			approvalUrl.searchParams.set('workflow_execution_id', created.workflowExecutionId);
+
+			return json({
+				ok: true,
+				workflow_execution_id: created.workflowExecutionId,
+				approval_url: approvalUrl.toString(),
+			});
+		}
+
 		const formData = await event.request.formData();
 		const workflowExecutionId = formData.get('workflow_execution_id')?.toString().trim();
 
@@ -57,7 +87,7 @@ export const actions: Actions = {
 			return fail(404, { error: 'Approval request not found or expired.' });
 		}
 
-		const webhookUrl = env.ACTION_ITEMS_APPROVAL_WEBHOOK_URL;
+		const webhookUrl = env.N8N_INGESTION_URL ?? env.ACTION_ITEMS_APPROVAL_WEBHOOK_URL;
 		if (!webhookUrl) {
 			return fail(500, { error: 'Approval webhook URL is not configured.' });
 		}
