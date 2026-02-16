@@ -3,6 +3,7 @@
 // sends prepared data to n8n for QB/Monday.com
 
 import { CohereClientV2 } from 'cohere-ai';
+import { getTodayEastern } from '$lib/utils/datetime';
 import {
 	getEmployeeByName,
 	getCustomerByName,
@@ -29,7 +30,7 @@ export class TimeEntryService {
 	}
 
 	async extractTimeDetails(message: string): Promise<ExtractedTimeData> {
-		const today = new Date().toISOString().split('T')[0];
+		const today = getTodayEastern();
 
 		const prompt = `Extract time entry details from this message. Return ONLY valid JSON.
 
@@ -161,7 +162,7 @@ Return ONLY the JSON, no other text.`;
 				tasks_completed: timeData.tasks_completed,
 				hours: timeData.hours,
 				billable: timeData.billable,
-				entry_date: new Date().toISOString().split('T')[0],
+				entry_date: getTodayEastern(),
 				submitted_by: input.userName,
 				submitted_at: input.localTimestamp,
 			};

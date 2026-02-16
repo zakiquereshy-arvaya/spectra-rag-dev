@@ -137,8 +137,50 @@ export function estimateChatHistoryTokens(messages: GenericChatMessage[]): numbe
 }
 
 /**
- * Truncate chat history to fit within token limit
- * Preserves the most recent messages and system messages
+ * Check if a message is a conversation summary (from summarization system)
+ */
+function isSummaryMessage(msg: GenericChatMessage): boolean {
+	if (msg.role !== 'assistant') return false;
+	const content = typeof msg.content === 'string' ? msg.content : '';
+	return content.startsWith('[CONVERSATION_SUMMARY]');
+}
+
+/**
+ * Group messages into "tool-call groups" for safe truncation.
+ * A tool-call group is: [assistant+toolCalls, tool, tool, ...] 
+ * All other messages are standalone groups of size 1.
+ * This ensures we never split an assistant+toolCalls from its tool results.
+ */
+function groupMessages(messages: GenericChatMessage[]): GenericChatMessage[][] {
+	const groups: GenericChatMessage[][] = [];
+	let i = 0;
+
+	while (i < messages.length) {
+		const msg = messages[i];
+
+		// If this is an assistant message with toolCalls, group it with following tool messages
+		if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+			const group: GenericChatMessage[] = [msg];
+			i++;
+			// Collect all immediately following tool messages
+			while (i < messages.length && messages[i].role === 'tool') {
+				group.push(messages[i]);
+				i++;
+			}
+			groups.push(group);
+		} else {
+			groups.push([msg]);
+			i++;
+		}
+	}
+
+	return groups;
+}
+
+/**
+ * Truncate chat history to fit within token limit.
+ * Preserves system messages, conversation summaries, and the most recent messages.
+ * Tool-call groups (assistant+toolCalls followed by tool messages) are kept together.
  */
 export function truncateChatHistory(
 	messages: GenericChatMessage[],
@@ -157,44 +199,58 @@ export function truncateChatHistory(
 		return messages;
 	}
 
-	// Separate system messages and regular messages
+	// Separate system messages, summary messages, and regular messages
 	const systemMessages = preserveSystemMessages
 		? messages.filter((m) => m.role === 'system')
 		: [];
-	const nonSystemMessages = messages.filter((m) => m.role !== 'system');
+	const summaryMessages = messages.filter(isSummaryMessage);
+	const nonSystemMessages = messages.filter((m) => m.role !== 'system' && !isSummaryMessage(m));
 
-	// Calculate tokens used by system messages
-	const systemTokens = estimateChatHistoryTokens(systemMessages);
-	const availableTokens = maxTokens - systemTokens;
+	// Calculate tokens used by preserved messages (system + summaries)
+	const preservedTokens = estimateChatHistoryTokens(systemMessages) + estimateChatHistoryTokens(summaryMessages);
+	const availableTokens = maxTokens - preservedTokens;
 
 	if (availableTokens <= 0) {
-		// Even system messages exceed limit, truncate them too
-		return truncateMessages(messages, maxTokens);
+		// Even preserved messages exceed limit, truncate everything
+		return truncateMessageGroups(nonSystemMessages, maxTokens);
 	}
 
-	// Preserve recent messages
-	const recentMessages = nonSystemMessages.slice(-preserveRecentCount);
+	// Group messages to keep tool-call groups intact
+	const groups = groupMessages(nonSystemMessages);
+
+	// Determine how many groups to include from the end to satisfy preserveRecentCount
+	// Count individual messages from the end until we have at least preserveRecentCount
+	let recentGroupCount = 0;
+	let recentMessageCount = 0;
+	for (let i = groups.length - 1; i >= 0; i--) {
+		recentGroupCount++;
+		recentMessageCount += groups[i].length;
+		if (recentMessageCount >= preserveRecentCount) break;
+	}
+
+	const recentGroups = groups.slice(-recentGroupCount);
+	const recentMessages = recentGroups.flat();
 	const recentTokens = estimateChatHistoryTokens(recentMessages);
 
 	if (recentTokens >= availableTokens) {
 		// Even recent messages exceed limit
-		const truncatedRecent = truncateMessages(recentMessages, availableTokens);
-		return [...systemMessages, ...truncatedRecent];
+		const truncatedRecent = truncateMessageGroups(recentMessages, availableTokens);
+		return [...systemMessages, ...summaryMessages, ...truncatedRecent];
 	}
 
-	// Add older messages until we hit the limit
-	const olderMessages = nonSystemMessages.slice(0, -preserveRecentCount);
+	// Add older message groups until we hit the limit
+	const olderGroups = groups.slice(0, -recentGroupCount);
 	const remainingTokens = availableTokens - recentTokens;
 
 	const includedOlder: GenericChatMessage[] = [];
 	let usedTokens = 0;
 
-	// Add from oldest to newest (to maintain order)
-	for (const msg of olderMessages) {
-		const msgTokens = estimateMessageTokens(msg);
-		if (usedTokens + msgTokens <= remainingTokens) {
-			includedOlder.push(msg);
-			usedTokens += msgTokens;
+	// Add from oldest to newest (to maintain order), keeping groups intact
+	for (const group of olderGroups) {
+		const groupTokens = estimateChatHistoryTokens(group);
+		if (usedTokens + groupTokens <= remainingTokens) {
+			includedOlder.push(...group);
+			usedTokens += groupTokens;
 		} else {
 			// Add truncation indicator
 			includedOlder.push({
@@ -205,24 +261,26 @@ export function truncateChatHistory(
 		}
 	}
 
-	return [...systemMessages, ...includedOlder, ...recentMessages];
+	return [...systemMessages, ...summaryMessages, ...includedOlder, ...recentMessages];
 }
 
 /**
- * Simple message truncation - removes oldest messages first
+ * Simple message truncation - removes oldest message groups first.
+ * Keeps tool-call groups intact to avoid orphaned tool messages.
  */
-function truncateMessages(messages: GenericChatMessage[], maxTokens: number): GenericChatMessage[] {
+function truncateMessageGroups(messages: GenericChatMessage[], maxTokens: number): GenericChatMessage[] {
+	const groups = groupMessages(messages);
 	const result: GenericChatMessage[] = [];
 	let totalTokens = 0;
 
-	// Process from newest to oldest
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		const msgTokens = estimateMessageTokens(msg);
+	// Process from newest to oldest (keep most recent groups)
+	for (let i = groups.length - 1; i >= 0; i--) {
+		const group = groups[i];
+		const groupTokens = estimateChatHistoryTokens(group);
 
-		if (totalTokens + msgTokens <= maxTokens) {
-			result.unshift(msg);
-			totalTokens += msgTokens;
+		if (totalTokens + groupTokens <= maxTokens) {
+			result.unshift(...group);
+			totalTokens += groupTokens;
 		} else {
 			break;
 		}
@@ -283,7 +341,100 @@ function stripInternalFields(message: GenericChatMessage): GenericChatMessage {
 }
 
 /**
- * Prepare chat history for API call - truncates if needed and strips internal fields
+ * Sanitize tool messages to ensure valid OpenAI message ordering.
+ * 
+ * OpenAI requires that every message with role 'tool' must immediately follow
+ * (or be part of a group following) an assistant message that contains 'tool_calls'.
+ * The tool message's toolCallId must also match one of the tool_calls in that assistant message.
+ * 
+ * This function:
+ * 1. Removes orphaned 'tool' messages that don't have a preceding assistant+toolCalls
+ * 2. Strips toolCalls from assistant messages whose tool results were removed
+ * 3. Ensures the message array is always valid for the OpenAI API
+ */
+export function sanitizeToolMessages(messages: GenericChatMessage[]): GenericChatMessage[] {
+	if (!messages || messages.length === 0) return messages;
+
+	const result: GenericChatMessage[] = [];
+
+	for (let i = 0; i < messages.length; i++) {
+		const msg = messages[i];
+
+		if (msg.role === 'tool') {
+			// Check if there's a preceding assistant message with matching tool_calls
+			let hasMatchingAssistant = false;
+			for (let j = result.length - 1; j >= 0; j--) {
+				const prev = result[j];
+				if (prev.role === 'tool') {
+					// Continue looking back past other tool messages in the same group
+					continue;
+				}
+				if (prev.role === 'assistant' && prev.toolCalls && prev.toolCalls.length > 0) {
+					// Check if this tool message's ID matches one of the tool_calls
+					if (!msg.toolCallId) {
+						break; // No toolCallId, can't match
+					}
+					const matchingCall = prev.toolCalls.find(tc => tc.id === msg.toolCallId);
+					if (matchingCall) {
+						hasMatchingAssistant = true;
+					}
+				}
+				break; // Stop at the first non-tool message
+			}
+
+			if (!hasMatchingAssistant) {
+				console.warn(
+					`[sanitizeToolMessages] Removing orphaned tool message (toolCallId: ${msg.toolCallId || 'none'}) - no matching assistant with tool_calls`
+				);
+				continue; // Skip this orphaned tool message
+			}
+		}
+
+		result.push(msg);
+	}
+
+	// Second pass: remove assistant messages with toolCalls where ALL tool results are missing
+	const finalResult: GenericChatMessage[] = [];
+	for (let i = 0; i < result.length; i++) {
+		const msg = result[i];
+
+		if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+			// Check if any of the tool results follow
+			const toolCallIds = new Set(msg.toolCalls.map(tc => tc.id));
+			let hasAnyToolResult = false;
+			for (let j = i + 1; j < result.length; j++) {
+				if (result[j].role === 'tool' && result[j].toolCallId && toolCallIds.has(result[j].toolCallId!)) {
+					hasAnyToolResult = true;
+					break;
+				}
+				if (result[j].role !== 'tool') break; // Stop at next non-tool message
+			}
+
+			if (!hasAnyToolResult) {
+				// Strip toolCalls from the assistant message to avoid dangling references
+				// Keep the message if it has content, otherwise replace with a placeholder
+				const cleanMsg: GenericChatMessage = { ...msg };
+				delete cleanMsg.toolCalls;
+				if (!cleanMsg.content) {
+					cleanMsg.content = 'Processing request...';
+				}
+				console.warn(
+					`[sanitizeToolMessages] Stripping toolCalls from assistant message - no matching tool results found`
+				);
+				finalResult.push(cleanMsg);
+				continue;
+			}
+		}
+
+		finalResult.push(msg);
+	}
+
+	return finalResult;
+}
+
+/**
+ * Prepare chat history for API call - truncates if needed, sanitizes tool messages,
+ * and strips internal fields
  */
 export function prepareChatHistory(
 	messages: GenericChatMessage[],
@@ -291,6 +442,8 @@ export function prepareChatHistory(
 ): GenericChatMessage[] {
 	const limit = getModelTokenLimit(model);
 	const truncated = truncateChatHistory(messages, limit);
+	// Sanitize tool messages to ensure proper ordering for OpenAI API
+	const sanitized = sanitizeToolMessages(truncated);
 	// Strip internal fields like _timestamp before sending to OpenAI
-	return truncated.map(stripInternalFields);
+	return sanitized.map(stripInternalFields);
 }

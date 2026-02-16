@@ -6,6 +6,8 @@ import { MCPServer } from './mcp-server';
 import { BillingMCPServer } from './billing-mcp-server';
 import { UnifiedMCPServer } from './unified-mcp-server';
 import { MicrosoftGraphAuth } from './microsoft-graph-auth';
+import { getChatHistoryAsync } from './chat-history-store';
+import type { GenericChatMessage } from '$lib/utils/tokens';
 
 // Confidence threshold for routing to specialized experts
 const CONFIDENCE_THRESHOLD = 0.80;
@@ -101,7 +103,7 @@ export class MoERouter {
 	/**
 	 * Classify a message and return the result
 	 */
-	async classifyMessage(message: string): Promise<ClassificationResult> {
+	async classifyMessage(message: string, sessionId?: string): Promise<ClassificationResult> {
 		// First try quick pattern matching
 		const quickResult = this.classifier.quickClassify(message);
 		if (quickResult) {
@@ -110,8 +112,23 @@ export class MoERouter {
 			return quickResult;
 		}
 
-		// Fall back to LLM classification
-		const classification = await this.classifier.classify(message);
+		// Load recent chat history for context (helps classify follow-up queries)
+		let chatHistory: Array<{ role: string; content?: string | null | unknown }> = [];
+		if (sessionId) {
+			try {
+				const fullHistory = await getChatHistoryAsync(sessionId);
+				// Take last 4 messages for classification context
+				chatHistory = fullHistory.slice(-4).map(msg => ({
+					role: msg.role,
+					content: typeof msg.content === 'string' ? msg.content : '',
+				}));
+			} catch (e) {
+				console.warn('[MoE Router] Could not load chat history for classification:', e);
+			}
+		}
+
+		// Fall back to LLM classification with chat history context
+		const classification = await this.classifier.classify(message, chatHistory as any);
 		console.log(`[MoE Router] LLM classification: ${classification.category} (${classification.confidence}) - ${classification.reasoning}`);
 		this.lastClassification = classification;
 		return classification;
@@ -145,8 +162,8 @@ export class MoERouter {
 			return;
 		}
 
-		// Step 1: Classify the message
-		const classification = await this.classifyMessage(message);
+		// Step 1: Classify the message (pass sessionId for chat history context)
+		const classification = await this.classifyMessage(message, sessionId);
 		const lower = message.toLowerCase();
 		const hasTimeEntryIndicators =
 			/\b(log|record|submit|entry)\b/i.test(lower) ||

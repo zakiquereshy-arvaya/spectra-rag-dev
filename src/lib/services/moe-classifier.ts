@@ -223,6 +223,11 @@ Return ONLY the JSON classification.`;
 			/\b(calendar|appointment|available|free\s+(time|slot))\b/,
 			// Only match "meeting" if it's clearly about scheduling, not in task descriptions
 			/\b(create|set\s+up|arrange)\s+(a\s+)?meeting\b/,
+			// Follow-up queries about meetings/events (e.g., "what are her meetings", "show his events")
+			/\bwhat\b.*\b(meetings?|events?|appointments?)\b/,
+			/\b(show|list|get|see)\b.*\b(meetings?|events?|appointments?|calendar)\b/,
+			/\b(her|his|their|my)\s+(meetings?|events?|appointments?|calendar|schedule)\b/,
+			/\b(meetings?|events?)\s+(for|on|today|tomorrow|this|next)\b/,
 		];
 
 		for (const pattern of appointmentPatterns) {
