@@ -13,6 +13,7 @@ import {
 } from './azero-db';
 import { getChatHistoryAsync, setChatHistoryAsync } from './chat-history-store';
 import { prepareChatHistory } from '$lib/utils/tokens';
+import { getTodayEastern, formatDateEastern } from '$lib/utils/datetime';
 import { BILLI_DEV_WEBHOOK_URL } from '$env/static/private';
 
 // Extended message type with timestamp for storage
@@ -209,17 +210,18 @@ export class BillingMCPServer {
 					const match = lowerContent.match(pattern);
 					if (match && !info.entry_date) {
 						if (match[0].toLowerCase() === 'today') {
-							info.entry_date = new Date().toISOString().split('T')[0];
+							info.entry_date = getTodayEastern();
 						} else if (match[0].toLowerCase() === 'yesterday') {
-							const yesterday = new Date();
+							const todayParts = getTodayEastern().split('-').map(Number);
+							const yesterday = new Date(todayParts[0], todayParts[1] - 1, todayParts[2]);
 							yesterday.setDate(yesterday.getDate() - 1);
-							info.entry_date = yesterday.toISOString().split('T')[0];
+							info.entry_date = formatDateEastern(yesterday);
 						} else if (match[1]) {
 							// Parse date string
 							const dateStr = match[1];
 							if (dateStr.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
 								const [month, day, year] = dateStr.split('/').map(Number);
-								info.entry_date = new Date(year, month - 1, day).toISOString().split('T')[0];
+								info.entry_date = formatDateEastern(new Date(year, month - 1, day));
 							} else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
 								info.entry_date = dateStr;
 							}
@@ -373,6 +375,10 @@ export class BillingMCPServer {
 					// REJECT FAKE/PLACEHOLDER IDs - must be real from database lookups
 					// Note: QBO IDs can be single digits (e.g., "3" for Arvaya Administrative), so we only check patterns
 					const fakeIdPatterns = /^(EMP|CUST|ID|QBO|TEST|PLACEHOLDER|XXX|000)/i;
+					const placeholderNamePatterns = /^(unknown|placeholder|test|employee|user|n\/?a)\b/i;
+					if (placeholderNamePatterns.test(String(employee_name).trim())) {
+						throw new Error(`INVALID employee_name "${employee_name}". Resolve the real employee from prod_employees first.`);
+					}
 					if (fakeIdPatterns.test(String(employee_qbo_id))) {
 						throw new Error(`INVALID employee_qbo_id "${employee_qbo_id}". Call lookup_employee("${employee_name}") to get the real ID.`);
 					}
@@ -396,7 +402,7 @@ export class BillingMCPServer {
 						tasks_completed,
 						hours: parseFloat(hours),
 						billable: billable !== false,
-						entry_date: entry_date || new Date().toISOString().split('T')[0],
+						entry_date: entry_date || getTodayEastern(),
 						submitted_by: this.loggedInUser?.name || 'Unknown User',
 						submitted_at: new Date().toISOString(),
 					};
@@ -409,26 +415,32 @@ export class BillingMCPServer {
 					});
 
 					if (!response.ok) {
-						const errorText = await response.text();
-						throw new Error(`Failed to submit time entry: ${response.statusText}. ${errorText}`);
+						let errorBody = '';
+						try {
+							errorBody = await response.text();
+						} catch {
+							// Body read can fail if connection closed early
+						}
+						throw new Error(`Failed to submit time entry: ${response.statusText}. ${errorBody}`);
 					}
 
-					// Parse response if available
-					let webhookResult = null;
-					const responseText = await response.text();
-					if (responseText && responseText.trim()) {
-						try {
-							webhookResult = JSON.parse(responseText);
-						} catch {
-							// Non-JSON response is OK
-						}
-					}
+					// Don't read response body — n8n webhooks can close the stream
+					// after sending headers, causing response.text() to throw and
+					// making a successful submission look like a failure.
+					const sanitizedTimeEntry = {
+						employee_name,
+						customer_name,
+						tasks_completed,
+						hours: parseFloat(hours),
+						billable: billable !== false,
+						entry_date: entry_date || getTodayEastern(),
+						submitted_by: this.loggedInUser?.name || 'Unknown User',
+					};
 
 					return {
 						success: true,
 						message: 'Time entry submitted successfully',
-						timeEntry,
-						webhookResult,
+						timeEntry: sanitizedTimeEntry,
 					};
 				}
 
@@ -438,6 +450,26 @@ export class BillingMCPServer {
 		} catch (error: any) {
 			console.error(`[BillingMCP] Tool execution error for ${name}:`, error);
 			throw new Error(`Tool execution error: ${error.message}`);
+		}
+	}
+
+	/**
+	 * Get human-readable status label for a tool
+	 */
+	private getToolStatusLabel(toolName: string): string {
+		switch (toolName) {
+			case 'lookup_employee':
+				return 'Looking up employee...';
+			case 'lookup_customer':
+				return 'Looking up customer...';
+			case 'list_employees':
+				return 'Loading employees...';
+			case 'list_customers':
+				return 'Loading customers...';
+			case 'submit_time_entry':
+				return 'Submitting time entry...';
+			default:
+				return 'Processing...';
 		}
 	}
 
@@ -460,7 +492,7 @@ export class BillingMCPServer {
 
 			// Get current date info for the AI
 			const now = new Date();
-			const todayStr = now.toISOString().split('T')[0];
+			const todayStr = getTodayEastern();
 			const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/New_York' });
 			const formattedDate = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' });
 
@@ -471,7 +503,7 @@ export class BillingMCPServer {
 
 **CURRENT DATE: ${dayOfWeek}, ${formattedDate} (${todayStr})**
 - "today" = ${todayStr}
-- "yesterday" = ${new Date(now.getTime() - 86400000).toISOString().split('T')[0]}
+- "yesterday" = ${(() => { const p = todayStr.split('-').map(Number); const y = new Date(p[0], p[1]-1, p[2]); y.setDate(y.getDate()-1); return formatDateEastern(y); })()}
 
 **LOGGED-IN USER: ${this.loggedInUser?.name || 'Unknown'} (${this.loggedInUser?.email || 'no email'})**
 
@@ -570,7 +602,7 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 								customer_qbo_id: timeEntryInfo.customer_qbo_id,
 								tasks_completed: timeEntryInfo.tasks_completed,
 								hours: timeEntryInfo.hours,
-								entry_date: timeEntryInfo.entry_date || new Date().toISOString().split('T')[0],
+								entry_date: timeEntryInfo.entry_date || getTodayEastern(),
 								billable: true,
 							},
 						});
@@ -604,6 +636,8 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 				const toolResults: GenericChatMessage[] = [];
 				for (const toolCall of toolCalls) {
 					try {
+						const statusLabels: Record<string, string> = { lookup_employee: "Looking up employee...", lookup_customer: "Looking up customer...", list_employees: "Loading employees...", list_customers: "Loading customers...", submit_time_entry: "Submitting time entry..." };
+						yield `[TOOL_STATUS:${JSON.stringify({ tool: toolCall.name, status: "executing", label: statusLabels[toolCall.name] || "Processing..." })}]`;
 						console.log(`[BillingMCP] Executing tool: ${toolCall.name}`, toolCall.parameters);
 						const result = await this.callTool(toolCall.name, toolCall.parameters);
 
@@ -612,6 +646,9 @@ When user provides multiple tasks in one message (e.g., "ICE - Task A - 1 hour. 
 							console.log(`[BillingMCP] TIME ENTRY SUBMITTED SUCCESSFULLY`);
 						}
 
+						if (toolCall.name === "submit_time_entry" && result.success === true) {
+							yield `[TOOL_RESULT:${JSON.stringify({ type: "time_entry", data: result.timeEntry })}]`;
+						}
 						toolResults.push({ role: 'tool', content: JSON.stringify(result), toolCallId: toolCall.id });
 					} catch (error: any) {
 						console.error(`[BillingMCP] Tool ${toolCall.name} failed:`, error);

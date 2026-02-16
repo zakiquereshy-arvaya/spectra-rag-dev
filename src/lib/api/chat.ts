@@ -1,10 +1,17 @@
 import { PUBLIC_N8N_CHAT_WH_URL } from '$env/static/public';
 import { fetchWithRetry } from '$lib/utils/retry';
 
+export interface ToolResultData {
+	type: 'availability' | 'booking' | 'time_entry';
+	data: Record<string, any>;
+}
+
 export interface ChatMessage {
 	role: 'user' | 'assistant';
 	content: string;
 	timestamp: string;
+	toolResult?: ToolResultData;
+	suggestions?: Array<{ label: string; action: string }>;
 }
 
 export interface ChatResponse {

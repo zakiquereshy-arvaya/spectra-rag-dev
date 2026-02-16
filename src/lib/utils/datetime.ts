@@ -1,7 +1,54 @@
 /**
  * Date/Time Utilities
  * Centralized date and time parsing/formatting functions
+ *
+ * IMPORTANT: All date calculations use America/New_York timezone
+ * to avoid UTC date drift (e.g. 10 PM EST = next day in UTC).
  */
+
+/**
+ * Get today's date in YYYY-MM-DD format in Eastern Time.
+ * This avoids the UTC drift issue where toISOString() returns
+ * the next day when it's evening in EST/EDT.
+ */
+export function getTodayEastern(): string {
+	return formatDateEastern(new Date());
+}
+
+/**
+ * Format a Date object as YYYY-MM-DD in Eastern Time.
+ */
+export function formatDateEastern(date: Date): string {
+	const parts = new Intl.DateTimeFormat('en-CA', {
+		timeZone: 'America/New_York',
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+	}).formatToParts(date);
+	const year = parts.find(p => p.type === 'year')!.value;
+	const month = parts.find(p => p.type === 'month')!.value;
+	const day = parts.find(p => p.type === 'day')!.value;
+	return `${year}-${month}-${day}`;
+}
+
+/**
+ * Get the Eastern Time UTC offset for a given date (handles EST/EDT automatically).
+ * Returns a string like "-05:00" or "-04:00".
+ */
+export function getEasternOffset(dateStr: string): string {
+	const probe = new Date(`${dateStr}T12:00:00Z`);
+	const parts = new Intl.DateTimeFormat('en-US', {
+		timeZone: 'America/New_York',
+		timeZoneName: 'shortOffset',
+	}).formatToParts(probe);
+	const tz = parts.find((part) => part.type === 'timeZoneName')?.value || 'GMT-05:00';
+	const match = tz.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+	if (!match) return '-05:00';
+	const sign = match[1];
+	const hours = match[2].padStart(2, '0');
+	const minutes = (match[3] ?? '00').padStart(2, '0');
+	return `${sign}${hours}:${minutes}`;
+}
 
 // Day name to number mapping
 const DAY_MAP: Record<string, number> = {
@@ -20,29 +67,31 @@ const DAY_MAP: Record<string, number> = {
  */
 export function parseNaturalDate(dateString: string | undefined | null): string {
 	if (!dateString || dateString.trim() === '') {
-		const today = new Date();
-		return today.toISOString().split('T')[0];
+		return getTodayEastern();
 	}
 
 	const lower = dateString.toLowerCase().trim();
-	const today = new Date();
-	today.setHours(0, 0, 0, 0);
+	const todayStr = getTodayEastern();
+
+	// Build a "today" Date anchored to Eastern midnight for relative calculations
+	const [ty, tm, td] = todayStr.split('-').map(Number);
+	const today = new Date(ty, tm - 1, td);
 
 	// Handle relative dates
 	if (lower === 'today') {
-		return today.toISOString().split('T')[0];
+		return todayStr;
 	}
 
 	if (lower === 'tomorrow') {
 		const tomorrow = new Date(today);
 		tomorrow.setDate(tomorrow.getDate() + 1);
-		return tomorrow.toISOString().split('T')[0];
+		return formatDateEastern(tomorrow);
 	}
 
 	if (lower === 'yesterday') {
 		const yesterday = new Date(today);
 		yesterday.setDate(yesterday.getDate() - 1);
-		return yesterday.toISOString().split('T')[0];
+		return formatDateEastern(yesterday);
 	}
 
 	// Handle "next [day]" patterns
@@ -51,31 +100,37 @@ export function parseNaturalDate(dateString: string | undefined | null): string 
 		const dayName = nextDayMatch[1];
 		const targetDay = DAY_MAP[dayName];
 		const nextDate = new Date(today);
-		const daysUntil = (targetDay - today.getDay() + 7) % 7 || 7; // If today, get next week's
+		const daysUntil = (targetDay - today.getDay() + 7) % 7 || 7;
 		nextDate.setDate(today.getDate() + daysUntil);
-		return nextDate.toISOString().split('T')[0];
+		return formatDateEastern(nextDate);
 	}
 
-	// Handle "this [day]" patterns
-	const thisDayMatch = lower.match(/this\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+	// Handle "this [day]", "this coming [day]", and "coming [day]" patterns
+	const thisDayMatch = lower.match(/(?:this\s+(?:coming\s+)?|coming\s+)(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
 	if (thisDayMatch) {
 		const dayName = thisDayMatch[1];
 		const targetDay = DAY_MAP[dayName];
 		const thisDate = new Date(today);
 		const daysUntil = (targetDay - today.getDay() + 7) % 7;
-		thisDate.setDate(today.getDate() + daysUntil);
-		return thisDate.toISOString().split('T')[0];
+		// If "coming" is used and today IS that day, go to next week
+		const hasComingKeyword = lower.includes('coming');
+		if (daysUntil === 0 && hasComingKeyword) {
+			thisDate.setDate(today.getDate() + 7);
+		} else {
+			thisDate.setDate(today.getDate() + (daysUntil || (hasComingKeyword ? 7 : 0)));
+		}
+		return formatDateEastern(thisDate);
 	}
 
 	// Try parsing as date string (MM/DD/YYYY, YYYY-MM-DD, etc.)
 	let parsedDate: Date;
 	if (lower.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
-		// MM/DD/YYYY format
+		// MM/DD/YYYY format — construct directly to avoid UTC interpretation
 		const [month, day, year] = lower.split('/').map(Number);
 		parsedDate = new Date(year, month - 1, day);
 	} else if (lower.match(/^\d{4}-\d{2}-\d{2}$/)) {
-		// YYYY-MM-DD format
-		parsedDate = new Date(lower + 'T00:00:00');
+		// YYYY-MM-DD format — return as-is (already correct format)
+		return lower;
 	} else {
 		// Try native Date parsing
 		parsedDate = new Date(dateString);
@@ -83,10 +138,10 @@ export function parseNaturalDate(dateString: string | undefined | null): string 
 
 	if (isNaN(parsedDate.getTime())) {
 		console.warn(`Could not parse date: ${dateString}, using today`);
-		return today.toISOString().split('T')[0];
+		return todayStr;
 	}
 
-	return parsedDate.toISOString().split('T')[0];
+	return formatDateEastern(parsedDate);
 }
 
 /**
@@ -177,12 +232,9 @@ export function parseTimeInEastern(timeStr: string, dateStr: string): string | n
 		return null;
 	}
 
-	// Create date in Eastern timezone
-	const dateObj = new Date(`${dateStr}T${String(parsed.hours).padStart(2, '0')}:${String(parsed.minutes).padStart(2, '0')}:00`);
-
-	// Adjust for EST/EDT (-05:00 or -04:00)
-	// For simplicity, using fixed -05:00 (EST)
-	const isoString = `${dateStr}T${String(parsed.hours).padStart(2, '0')}:${String(parsed.minutes).padStart(2, '0')}:00-05:00`;
+	// Dynamically determine EST/EDT offset for the given date
+	const offset = getEasternOffset(dateStr);
+	const isoString = `${dateStr}T${String(parsed.hours).padStart(2, '0')}:${String(parsed.minutes).padStart(2, '0')}:00${offset}`;
 
 	return new Date(isoString).toISOString();
 }
@@ -202,10 +254,7 @@ export function getDayOfWeek(dateStr: string): string {
  * Check if a date is in the past
  */
 export function isDateInPast(dateStr: string): boolean {
-	const date = new Date(dateStr + 'T00:00:00');
-	const today = new Date();
-	today.setHours(0, 0, 0, 0);
-	return date < today;
+	return dateStr < getTodayEastern();
 }
 
 /**

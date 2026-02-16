@@ -100,10 +100,11 @@ export class OpenAIService {
 	}
 
 	/**
-	 * Convert internal ChatMessage format to OpenAI message format
+	 * Convert internal ChatMessage format to OpenAI message format.
+	 * Also performs a final safety-net sanitization to ensure no orphaned tool messages.
 	 */
 	private convertToOpenAIMessages(messages: ChatMessage[]): ChatCompletionMessageParam[] {
-		return messages.map((msg): ChatCompletionMessageParam => {
+		const converted = messages.map((msg): ChatCompletionMessageParam => {
 			const contentStr = this.extractContentString(msg.content);
 
 			if (msg.role === 'system') {
@@ -154,6 +155,43 @@ export class OpenAIService {
 				content: contentStr,
 			};
 		});
+
+		// Safety-net: ensure every 'tool' message follows an assistant message with tool_calls
+		return this.sanitizeConvertedMessages(converted);
+	}
+
+	/**
+	 * Final safety-net sanitization on converted OpenAI messages.
+	 * Removes any 'tool' messages that don't follow an assistant message with tool_calls.
+	 */
+	private sanitizeConvertedMessages(messages: ChatCompletionMessageParam[]): ChatCompletionMessageParam[] {
+		const result: ChatCompletionMessageParam[] = [];
+
+		for (let i = 0; i < messages.length; i++) {
+			const msg = messages[i];
+
+			if (msg.role === 'tool') {
+				// Look back for a preceding assistant message with tool_calls
+				let hasValidPredecessor = false;
+				for (let j = result.length - 1; j >= 0; j--) {
+					const prev = result[j];
+					if (prev.role === 'tool') continue; // Skip past other tool messages in same group
+					if (prev.role === 'assistant' && 'tool_calls' in prev && (prev as any).tool_calls?.length > 0) {
+						hasValidPredecessor = true;
+					}
+					break;
+				}
+
+				if (!hasValidPredecessor) {
+					console.warn(`[OpenAI] Dropping orphaned tool message at index ${i} (tool_call_id: ${(msg as any).tool_call_id || 'none'})`);
+					continue;
+				}
+			}
+
+			result.push(msg);
+		}
+
+		return result;
 	}
 
 	/**
@@ -182,10 +220,12 @@ export class OpenAIService {
 			message.toLowerCase().includes('schedule') ||
 			message.toLowerCase().includes('create meeting')
 		) {
+			const todayEastern = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+			const currentYear = todayEastern.split('-')[0];
 			messages.push({
 				role: 'system',
 				content:
-					'You are a helpful calendar assistant. When users ask to book, schedule, or create meetings, you MUST use the book_meeting tool. First call get_users_with_name_and_email to get the sender_email, then use book_meeting with all required parameters. You CAN and SHOULD book meetings when requested. If given a partial name like Ryan, Ashlee, David, etc. You must find the proper user and not pretend they dont exist. if its not recognized, identify the correct user',
+					`You are a helpful calendar assistant. Today's date is ${todayEastern}. The current year is ${currentYear}. NEVER use dates from 2024 or 2025. When users ask to book, schedule, or create meetings, you MUST use the book_meeting tool. First call get_users_with_name_and_email to get the sender_email, then use book_meeting with all required parameters. You CAN and SHOULD book meetings when requested. If given a partial name like Ryan, Ashlee, David, etc. You must find the proper user and not pretend they dont exist. if its not recognized, identify the correct user`,
 			});
 		}
 

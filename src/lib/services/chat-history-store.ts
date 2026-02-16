@@ -2,6 +2,7 @@
 // Replaces in-memory storage to work properly on serverless (Vercel)
 
 import { prepareChatHistory, getTokenUsage, type GenericChatMessage } from '$lib/utils/tokens';
+import { summarizeOlderMessages } from '$lib/utils/conversation-summary';
 import { getSupabaseClient } from './supabase';
 
 // Re-export for compatibility
@@ -65,16 +66,42 @@ export async function getPreparedChatHistoryAsync(
 
 /**
  * Set chat history for a session in Supabase (upsert)
+ * If openaiApiKey is provided, triggers conversation summarization when history exceeds threshold.
  */
-export async function setChatHistoryAsync(sessionId: string, history: GenericChatMessage[]): Promise<void> {
+export async function setChatHistoryAsync(
+	sessionId: string,
+	history: GenericChatMessage[],
+	openaiApiKey?: string
+): Promise<void> {
 	try {
 		const supabase = getSupabaseClient();
 
-		// Prune if exceeding max messages
-		const prunedHistory =
-			history.length > SESSION_CONFIG.maxMessagesPerSession
-				? history.slice(-SESSION_CONFIG.maxMessagesPerSession)
-				: history;
+		// Summarize older messages if API key is available and history is long
+		let processedHistory = history;
+		if (openaiApiKey && history.length > 20) {
+			try {
+				processedHistory = await summarizeOlderMessages(history, openaiApiKey, {
+					recentToKeep: 6,
+					threshold: 20,
+				});
+				console.log(`[ChatHistory] Summarized ${history.length} messages → ${processedHistory.length}`);
+			} catch (err) {
+				console.error('[ChatHistory] Summarization failed, using raw history:', err);
+				processedHistory = history;
+			}
+		}
+
+		// Prune if still exceeding max messages, ensuring we don't split tool-call groups
+		let prunedHistory = processedHistory;
+		if (processedHistory.length > SESSION_CONFIG.maxMessagesPerSession) {
+			let splitIndex = processedHistory.length - SESSION_CONFIG.maxMessagesPerSession;
+			// Walk backward if the split point lands on a 'tool' message
+			// to include its preceding assistant+toolCalls message
+			while (splitIndex > 0 && processedHistory[splitIndex]?.role === 'tool') {
+				splitIndex--;
+			}
+			prunedHistory = processedHistory.slice(splitIndex);
+		}
 
 		const { error } = await supabase
 			.from('chat_sessions')

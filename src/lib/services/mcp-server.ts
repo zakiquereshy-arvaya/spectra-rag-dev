@@ -13,6 +13,7 @@ import { OpenAIService } from './openai-service';
 import { CalendarAIHelper } from './ai-calendar-helpers';
 import { getChatHistoryAsync, setChatHistoryAsync } from './chat-history-store';
 import { prepareChatHistory, type GenericChatMessage } from '$lib/utils/tokens';
+import { getTodayEastern, formatDateEastern } from '$lib/utils/datetime';
 
 // Extended message type with timestamp for storage
 type StoredChatMessage = GenericChatMessage;
@@ -46,90 +47,74 @@ export class MCPServer {
 
 	private parseDate(dateString: string | undefined | null): string {
 		if (!dateString || dateString.trim() === '') {
-			const today = new Date();
-			return today.toISOString().split('T')[0];
+			return getTodayEastern();
 		}
 
 		const lower = dateString.toLowerCase().trim();
-		const today = new Date();
-		today.setHours(0, 0, 0, 0);
+		const todayStr = getTodayEastern();
+		const [ty, tm, td] = todayStr.split('-').map(Number);
+		const today = new Date(ty, tm - 1, td);
 
-		// Handle relative dates
-		if (lower === 'today') {
-			return today.toISOString().split('T')[0];
-		}
+		if (lower === 'today') return todayStr;
 
 		if (lower === 'tomorrow') {
 			const tomorrow = new Date(today);
 			tomorrow.setDate(tomorrow.getDate() + 1);
-			return tomorrow.toISOString().split('T')[0];
+			return formatDateEastern(tomorrow);
 		}
 
 		if (lower === 'yesterday') {
 			const yesterday = new Date(today);
 			yesterday.setDate(yesterday.getDate() - 1);
-			return yesterday.toISOString().split('T')[0];
+			return formatDateEastern(yesterday);
 		}
 
-		// Handle "next [day]" patterns
 		const nextDayMatch = lower.match(/next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
 		if (nextDayMatch) {
-			const dayName = nextDayMatch[1];
 			const dayMap: Record<string, number> = {
-				sunday: 0,
-				monday: 1,
-				tuesday: 2,
-				wednesday: 3,
-				thursday: 4,
-				friday: 5,
-				saturday: 6,
+				sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
 			};
-			const targetDay = dayMap[dayName];
+			const targetDay = dayMap[nextDayMatch[1]];
 			const nextDate = new Date(today);
-			const daysUntil = (targetDay - today.getDay() + 7) % 7 || 7; // If today, get next week's
+			const daysUntil = (targetDay - today.getDay() + 7) % 7 || 7;
 			nextDate.setDate(today.getDate() + daysUntil);
-			return nextDate.toISOString().split('T')[0];
+			return formatDateEastern(nextDate);
 		}
 
-		const thisDayMatch = lower.match(/this\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+		// Handle "this coming tuesday", "coming tuesday", "this tuesday"
+		const thisDayMatch = lower.match(/(?:this\s+(?:coming\s+)?|coming\s+)(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
 		if (thisDayMatch) {
-			const dayName = thisDayMatch[1];
 			const dayMap: Record<string, number> = {
-				sunday: 0,
-				monday: 1,
-				tuesday: 2,
-				wednesday: 3,
-				thursday: 4,
-				friday: 5,
-				saturday: 6,
+				sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
 			};
-			const targetDay = dayMap[dayName];
+			const targetDay = dayMap[thisDayMatch[1]];
 			const thisDate = new Date(today);
 			const daysUntil = (targetDay - today.getDay() + 7) % 7;
-			thisDate.setDate(today.getDate() + daysUntil);
-			return thisDate.toISOString().split('T')[0];
+			// If "this coming" and today IS that day, go to next week
+			if (daysUntil === 0 && lower.includes('coming')) {
+				thisDate.setDate(today.getDate() + 7);
+			} else {
+				thisDate.setDate(today.getDate() + (daysUntil || (lower.includes('coming') ? 7 : 0)));
+			}
+			return formatDateEastern(thisDate);
 		}
 
-		// Try parsing as date string (MM/DD/YYYY, YYYY-MM-DD, etc.)
 		let parsedDate: Date;
 		if (lower.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
-			// MM/DD/YYYY format
 			const [month, day, year] = lower.split('/').map(Number);
 			parsedDate = new Date(year, month - 1, day);
 		} else if (lower.match(/^\d{4}-\d{2}-\d{2}$/)) {
-			// YYYY-MM-DD format
-			parsedDate = new Date(lower + 'T00:00:00');
+			return lower;
 		} else {
-			// Try native Date parsing
 			parsedDate = new Date(dateString);
 		}
 
 		if (isNaN(parsedDate.getTime())) {
 			console.warn(`Could not parse date: ${dateString}, using today`);
-			return today.toISOString().split('T')[0];
+			return todayStr;
 		}
 
-		return parsedDate.toISOString().split('T')[0];
+		return formatDateEastern(parsedDate);
 	}
 
 	private getEasternOffset(dateStr: string): string {
@@ -337,11 +322,11 @@ export class MCPServer {
 						},
 						start_datetime: {
 							type: 'string',
-							description: 'Start time in YYYY-MM-DDTHH:MM:SS format (e.g., 2024-01-15T14:00:00)',
+							description: 'Start time in YYYY-MM-DDTHH:MM:SS format (e.g., 2026-02-15T14:00:00). Use the current year.',
 						},
 						end_datetime: {
 							type: 'string',
-							description: 'End time in YYYY-MM-DDTHH:MM:SS format (e.g., 2024-01-15T15:00:00)',
+							description: 'End time in YYYY-MM-DDTHH:MM:SS format (e.g., 2026-02-15T15:00:00). Use the current year.',
 						},
 						sender_name: {
 							type: 'string',
@@ -419,7 +404,7 @@ export class MCPServer {
 					
 					// Create datetime range for the full day in EST/EDT timezone
 					// Convert local midnight to UTC for the query
-					const dateObj = new Date(parsedDate + 'T00:00:00-05:00'); // EST offset
+					const dateObj = new Date(parsedDate + 'T00:00:00' + easternOffset);
 					const startDateTime = dateObj.toISOString();
 					const nextDay = new Date(dateObj);
 					nextDay.setDate(nextDay.getDate() + 1);
@@ -659,12 +644,13 @@ export class MCPServer {
 						return trimmed;
 					};
 
-					const dateStr = this.lastAvailabilityDate || new Date().toISOString().split('T')[0];
+					const dateStr = this.lastAvailabilityDate || getTodayEastern();
 					const startDateTimeStr = parseTimeInEastern(start_datetime, dateStr);
 					const endDateTimeStr = parseTimeInEastern(end_datetime, dateStr);
 					
-					const startDt = new Date(startDateTimeStr + '-05:00');
-					const endDt = new Date(endDateTimeStr + '-05:00');
+					const bookingOffset = this.getEasternOffset(dateStr);
+					const startDt = new Date(startDateTimeStr + bookingOffset);
+					const endDt = new Date(endDateTimeStr + bookingOffset);
 					
 					if (isNaN(startDt.getTime()) || isNaN(endDt.getTime())) {
 						throw new Error(`Invalid datetime format. Received start: "${start_datetime}", end: "${end_datetime}". Use YYYY-MM-DDTHH:MM:SS format or time like "9:00 AM".`);
@@ -1057,6 +1043,36 @@ export class MCPServer {
 				// Get tools for OpenAI
 				const tools = OpenAIService.createCalendarTools();
 
+				// Build system message with current date context so LLM knows the correct year
+				const now = new Date();
+				const todayStr = getTodayEastern();
+				const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/New_York' });
+				const formattedDate = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' });
+
+				const systemMessage: GenericChatMessage = {
+					role: 'system',
+					content: `You are Billi, an AI calendar assistant for Arvaya. You help with checking availability, finding free time slots, and booking meetings.
+
+CURRENT DATE CONTEXT (CRITICAL - USE THIS FOR ALL DATE CALCULATIONS)
+- Today: ${dayOfWeek}, ${formattedDate} (${todayStr})
+- Current year: ${todayStr.split('-')[0]}
+- "today" = ${todayStr}
+- "tomorrow" = ${(() => { const p = todayStr.split('-').map(Number); const y = new Date(p[0], p[1]-1, p[2]); y.setDate(y.getDate()+1); return formatDateEastern(y); })()}
+- When the user says "this coming [day]", "next [day]", or "this [day]", calculate the correct date using today's date above.
+- ALWAYS pass dates in YYYY-MM-DD format to tools, using the current year (${todayStr.split('-')[0]}).
+- NEVER use dates from 2024 or 2025. The current year is ${todayStr.split('-')[0]}.
+
+LOGGED-IN USER
+- Name: ${this.loggedInUser?.name || 'Unknown'}
+- Email: ${this.loggedInUser?.email || 'no email'}
+
+RULES
+- If a user provides a name (e.g., "Ryan", "Ashlee"), resolve it to the correct user. Do NOT say the user doesn't exist.
+- Use get_users_with_name_and_email to find the correct email if needed.
+- All times are in Eastern Time (EST/EDT).
+- When booking meetings, the logged-in user is always the organizer/sender.`,
+				};
+
 				// Add user message to history
 				this.pushToHistory({
 					role: 'user',
@@ -1069,18 +1085,26 @@ export class MCPServer {
 				let completed = false;
 
 				while (iteration < MAX_ITERATIONS) {
-					iteration++;
+				iteration++;
 
-					// Call OpenAI with streaming - pass truncated chat history
+					// Call OpenAI with streaming - pass truncated chat history with system message
 					// IMPORTANT: Buffer ALL initial response - don't yield text until we know if there are tool calls
 					const preparedHistory = prepareChatHistory(this.chatHistory);
+
+					// Diagnostic: log message structure to catch tool ordering issues
+					const msgStructure = preparedHistory.map((m, i) => {
+						const hasToolCalls = m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0;
+						return `[${i}] ${m.role}${hasToolCalls ? '+toolCalls(' + m.toolCalls!.length + ')' : ''}${m.toolCallId ? '(tcid:' + m.toolCallId.slice(0, 8) + ')' : ''}`;
+					});
+					console.log(`[MCP Stream] Iteration ${iteration}, prepared history (${preparedHistory.length} msgs):`, msgStructure.join(', '));
+
 					let fullText = '';
 					const toolCalls: any[] = [];
 
 					for await (const chunk of this.openaiService.chatStream(
 						currentMessage,
 						tools,
-						preparedHistory,
+						[systemMessage, ...preparedHistory],
 						undefined
 					)) {
 						if (chunk.type === 'text' && chunk.content) {
@@ -1125,11 +1149,20 @@ export class MCPServer {
 
 						// Execute tools and collect results
 						const toolResults: GenericChatMessage[] = [];
+						const availabilityResults: any[] = [];
 						for (const toolCall of toolCalls) {
 							try {
+							const statusLabels: Record<string, string> = { check_availability: "Checking calendar...", get_free_slots: "Checking calendar...", book_meeting: "Booking meeting...", get_users_with_name_and_email: "Looking up users..." };
+							yield `[TOOL_STATUS:${JSON.stringify({ tool: toolCall.name, status: "executing", label: statusLabels[toolCall.name] || "Processing..." })}]`;
 								console.log(`Executing tool: ${toolCall.name}`, toolCall.parameters);
 								const result = await this.callTool(toolCall.name, toolCall.parameters);
 								console.log(`Tool ${toolCall.name} succeeded:`, result);
+							if (toolCall.name === "check_availability") {
+								availabilityResults.push(result);
+							}
+							if (toolCall.name === "book_meeting" && result.validated_date_info) {
+								yield `[TOOL_RESULT:${JSON.stringify({ type: "booking", data: result.validated_date_info })}]`;
+							}
 								const toolContent = JSON.stringify(result);
 								if (toolContent && toolContent.trim()) {
 									toolResults.push({
@@ -1163,6 +1196,15 @@ export class MCPServer {
 							}
 						}
 
+						if (availabilityResults.length === 1) {
+							yield `[TOOL_RESULT:${JSON.stringify({ type: "availability", data: availabilityResults[0] })}]`;
+						} else if (availabilityResults.length > 1) {
+							yield `[TOOL_RESULT:${JSON.stringify({
+								type: "availability",
+								data: { results: availabilityResults },
+							})}]`;
+						}
+
 						// Add tool results to chat history
 						this.pushToHistory(...toolResults);
 
@@ -1185,7 +1227,7 @@ export class MCPServer {
 					for await (const chunk of this.openaiService.chatStream(
 						'Based on the tool results above, provide a clear and direct answer to the user\'s question.',
 						tools,
-						preparedHistoryForFinal,
+						[systemMessage, ...preparedHistoryForFinal],
 						'none'
 					)) {
 						if (chunk.type === 'text' && chunk.content) {
