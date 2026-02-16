@@ -668,11 +668,21 @@
 	}
 
 	let modeConfig = $derived.by(() => getModeConfig(currentMode));
+	let modeSubLabel = $derived.by(() => {
+		if (!isLoading) return 'Online';
+		if (toolStatus?.label) return toolStatus.label;
+		return `Working in ${modeConfig.label.toLowerCase()} mode`;
+	});
 </script>
 
-<div class="flex flex-col h-screen">
+<div class="relative flex h-screen flex-col overflow-hidden mesh-gradient-subtle">
+	<div class="pointer-events-none absolute inset-0 dot-pattern opacity-30"></div>
+	<div class="ambient-orb ambient-orb-amber"></div>
+	<div class="ambient-orb ambient-orb-sky"></div>
+	<div class="ambient-orb ambient-orb-violet"></div>
+
 	<!-- Header -->
-	<header class="glass sticky top-0 z-10 px-6 py-4">
+	<header class="glass sticky top-0 z-20 border-b border-white/5 px-6 py-4">
 		<div class="max-w-4xl mx-auto flex justify-between items-center">
 			<div class="flex items-center gap-4">
 				<div class="flex items-center gap-3">
@@ -691,7 +701,10 @@
 						>
 							Billi
 						</button>
-						<p class="text-xs text-slate-500">AI Assistant</p>
+						<div class="mt-0.5 flex items-center gap-2">
+							<span class="live-dot"></span>
+							<p class="text-xs text-slate-400">{modeSubLabel}</p>
+						</div>
 					</div>
 				</div>
 
@@ -745,7 +758,7 @@
 	{/if}
 
 	<!-- Messages -->
-	<div bind:this={chatScrollElement} onscroll={handleChatScroll} class="flex-1 overflow-y-auto px-6 py-6">
+	<div bind:this={chatScrollElement} onscroll={handleChatScroll} class="relative z-10 flex-1 overflow-y-auto px-6 py-6">
 		<div class="max-w-4xl mx-auto">
 			{#if isLoadingHistory}
 				<div class="flex items-center justify-center py-12">
@@ -792,7 +805,11 @@
 								</div>
 							</div>
 							<div class="max-w-[80%]">
-								<div class="glass-light rounded-2xl px-5 py-4 text-slate-200">
+								<div class="glass-light streaming-shell rounded-2xl px-5 py-4 text-slate-200">
+									<div class="mb-2 flex items-center gap-2 text-[11px] text-amber-300/90">
+										<span class="live-dot"></span>
+										<span>Billi is responding</span>
+									</div>
 									<div class="prose-chat text-sm max-w-none whitespace-pre-wrap">
 										{streamingContent}
 									</div>
@@ -807,7 +824,7 @@
 	</div>
 
 	<!-- Input -->
-	<div class="glass px-6 py-4">
+	<div class="glass sticky bottom-0 z-20 border-t border-white/8 px-6 py-4">
 		<div class="max-w-4xl mx-auto">
 			<!-- Slash command dropdown -->
 			{#if showSlashMenu && filteredSlashCommands.length > 0}

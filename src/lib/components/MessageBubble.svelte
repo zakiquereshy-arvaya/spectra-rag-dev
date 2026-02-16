@@ -77,8 +77,8 @@
 			<div
 				class="rounded-2xl px-4 py-3 {
 					message.role === 'user'
-						? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-lg shadow-amber-500/20'
-						: 'glass-light text-slate-100'
+						? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-lg shadow-amber-500/20 border border-amber-300/20'
+						: 'glass-light text-slate-100 border border-white/10'
 				}"
 			>
 				<div class="text-sm whitespace-pre-wrap break-words prose-chat">

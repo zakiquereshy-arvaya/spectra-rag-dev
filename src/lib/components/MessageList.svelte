@@ -125,7 +125,7 @@
 	{#if messages.length === 0}
 		<!-- Welcome state with quick actions -->
 		<div class="flex items-center justify-center h-full">
-			<div class="text-center max-w-lg w-full" in:fade={{ duration: 240 }}>
+			<div class="text-center max-w-xl w-full glass-light rounded-3xl border border-white/10 px-5 py-8" in:fade={{ duration: 240 }}>
 				<!-- Avatar -->
 				<button
 					type="button"
@@ -148,7 +148,8 @@
 
 				<!-- Greeting -->
 				<h2 class="text-xl font-bold text-white mb-1">{greeting}</h2>
-				<p class="text-sm text-slate-400 mb-8">What can I help you with?</p>
+				<p class="text-sm text-slate-400 mb-3">What can I help you with?</p>
+				<p class="text-xs text-slate-500 mb-8">Calendar coordination, meeting booking, and time logging in one place.</p>
 
 				<!-- Quick action grid -->
 				<div class="grid grid-cols-2 gap-3 px-4">
@@ -193,6 +194,7 @@
 						<span></span>
 					</div>
 				</div>
+				<div class="text-[11px] text-slate-500 pl-1">Billi is thinking...</div>
 				<!-- Tool status pill -->
 				{#if toolStatus}
 					<div
