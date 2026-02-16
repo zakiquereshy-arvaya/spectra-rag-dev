@@ -717,6 +717,14 @@
 			>
 				Clear Chat
 			</button>
+			<button
+				type="button"
+				onclick={togglePatchNotes}
+				class="ml-2 px-3 py-1.5 text-sm text-amber-300 hover:text-amber-200 glass border border-amber-500/30 rounded-lg transition-colors btn-press"
+				aria-label="Open Billi v1.1 patch notes"
+			>
+				v1.1 Notes
+			</button>
 		</div>
 	</header>
 
@@ -767,6 +775,7 @@
 					onQuickAction={handleQuickAction}
 					onSlotClick={handleSlotClick}
 					onSuggestionClick={handleSuggestionClick}
+					onPatchNotesClick={togglePatchNotes}
 				/>
 
 				{#if streamingContent}

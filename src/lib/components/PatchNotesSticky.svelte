@@ -87,6 +87,9 @@
 			'Comic Sans MS',
 			cursive;
 		line-height: 1.35;
+		max-height: min(72vh, 620px);
+		overflow-y: auto;
+		overscroll-behavior: contain;
 	}
 
 	.sticky-kicker {
@@ -141,5 +144,23 @@
 
 	.close-btn:hover {
 		opacity: 1;
+	}
+
+	.sticky-content::-webkit-scrollbar {
+		width: 8px;
+	}
+
+	.sticky-content::-webkit-scrollbar-track {
+		background: rgba(120, 53, 15, 0.08);
+		border-radius: 999px;
+	}
+
+	.sticky-content::-webkit-scrollbar-thumb {
+		background: rgba(120, 53, 15, 0.35);
+		border-radius: 999px;
+	}
+
+	.sticky-content::-webkit-scrollbar-thumb:hover {
+		background: rgba(120, 53, 15, 0.45);
 	}
 </style>
