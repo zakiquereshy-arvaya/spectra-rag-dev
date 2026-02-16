@@ -1,10 +1,11 @@
 <!-- src/routes/moe/+page.svelte - Billi AI Assistant -->
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { fly, scale } from 'svelte/transition';
+	import { fade, fly, scale } from 'svelte/transition';
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import MessageList from '$lib/components/MessageList.svelte';
 	import TimeEntryForm from '$lib/components/TimeEntryForm.svelte';
+	import PatchNotesSticky from '$lib/components/PatchNotesSticky.svelte';
 	import type { ChatMessage, ToolResultData } from '$lib/api/chat';
 	import { getSessionId, clearSessionId } from '$lib/stores/chat-persistence';
 
@@ -16,6 +17,7 @@
 	let isLoadingHistory = $state(true);
 	let sessionId = $state('');
 	let streamingContent = $state('');
+	let showPatchNotes = $state(false);
 
 	// Current mode indicator from classification
 	let currentMode = $state<'calendar' | 'billing' | 'assistant'>('assistant');
@@ -107,6 +109,45 @@
 			: slashCommands
 	);
 
+	const patchNotesSections = [
+		{
+			title: 'Core AI Upgrades',
+			items: [
+				'Refactored to modular intent + tool execution architecture in unified orchestration.',
+				'Added scoped prompt composition for calendar and billing paths.',
+				'Improved mixed-intent routing and stronger confidence-based expert selection.',
+				'Hardened time-entry execution so success is only reported after real submit.'
+			]
+		},
+		{
+			title: 'New Billing Flow',
+			items: [
+				'Added dedicated time-entry endpoint for structured form submissions.',
+				'Added employee/customer identity resolution with DB-backed QBO lookups.',
+				'Added developer test override support in dev mode for QA workflows.',
+				'Added stricter validation to block placeholder IDs and names.'
+			]
+		},
+		{
+			title: 'UI and UX',
+			items: [
+				'Added rich result cards: availability, team availability, booking, and time entry.',
+				'Added guided time-entry form with customer/project/date/hours/description controls.',
+				'Added slash commands, tool status indicators, and follow-up suggestion pills.',
+				'Improved scrolling, streaming, and loading behavior for smoother chat flow.'
+			]
+		},
+		{
+			title: 'Reliability and Context',
+			items: [
+				'Added conversation summarization to reduce token pressure on long threads.',
+				'Improved token-aware history truncation with safe tool-call grouping.',
+				'Expanded Eastern time/date utilities for safer natural-language scheduling.',
+				'Updated session history handling and Supabase-backed persistence paths.'
+			]
+		}
+	];
+
 	function getDistanceFromBottom(element: HTMLDivElement): number {
 		return element.scrollHeight - element.scrollTop - element.clientHeight;
 	}
@@ -126,6 +167,14 @@
 
 	function handleChatScroll() {
 		updateStickToBottom();
+	}
+
+	function togglePatchNotes() {
+		showPatchNotes = !showPatchNotes;
+	}
+
+	function closePatchNotes() {
+		showPatchNotes = false;
 	}
 
 	$effect(() => {
@@ -633,7 +682,15 @@
 						</svg>
 					</div>
 					<div>
-						<h1 class="text-xl font-bold text-white">Billi</h1>
+						<button
+							type="button"
+							onclick={togglePatchNotes}
+							class="text-xl font-bold text-white hover:text-amber-300 transition-colors cursor-pointer"
+							aria-expanded={showPatchNotes}
+							aria-label="Toggle Billi patch notes"
+						>
+							Billi
+						</button>
 						<p class="text-xs text-slate-500">AI Assistant</p>
 					</div>
 				</div>
@@ -662,6 +719,22 @@
 			</button>
 		</div>
 	</header>
+
+	{#if showPatchNotes}
+		<div
+			class="fixed inset-0 z-30 flex items-start justify-center pt-24 px-4 bg-black/35 backdrop-blur-[1px]"
+			transition:fade={{ duration: 140 }}
+		>
+			<div transition:scale={{ duration: 180, start: 0.95, easing: cubicOut }}>
+				<PatchNotesSticky
+					version="v1.1"
+					releaseLabel="Billi Release"
+					sections={patchNotesSections}
+					onClose={closePatchNotes}
+				/>
+			</div>
+		</div>
+	{/if}
 
 	<!-- Messages -->
 	<div bind:this={chatScrollElement} onscroll={handleChatScroll} class="flex-1 overflow-y-auto px-6 py-6">
