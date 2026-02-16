@@ -93,6 +93,16 @@
 	75%      { background-position: 25% 0%; }
 }
 
+@keyframes orb-drift {
+	0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+	50% { transform: translate3d(20px, -14px, 0) scale(1.06); }
+}
+
+@keyframes live-pulse {
+	0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+	50% { opacity: 0.55; box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
+}
+
 /* ───────────────────────────────────────────────
    Glass Utilities
    ─────────────────────────────────────────────── */
@@ -156,6 +166,53 @@
 .dot-pattern {
 	background-image: radial-gradient(circle, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
 	background-size: 32px 32px;
+}
+
+.ambient-orb {
+	position: absolute;
+	width: 22rem;
+	height: 22rem;
+	border-radius: 9999px;
+	filter: blur(64px);
+	opacity: 0.22;
+	pointer-events: none;
+	animation: orb-drift 12s var(--motion-ease-standard) infinite;
+}
+
+.ambient-orb-amber {
+	top: -8rem;
+	left: -6rem;
+	background: radial-gradient(circle, rgba(245, 158, 11, 0.45) 0%, rgba(245, 158, 11, 0) 70%);
+}
+
+.ambient-orb-sky {
+	right: -8rem;
+	top: 18%;
+	background: radial-gradient(circle, rgba(14, 165, 233, 0.35) 0%, rgba(14, 165, 233, 0) 70%);
+	animation-delay: 2.5s;
+}
+
+.ambient-orb-violet {
+	bottom: -10rem;
+	left: 35%;
+	background: radial-gradient(circle, rgba(168, 85, 247, 0.3) 0%, rgba(168, 85, 247, 0) 70%);
+	animation-delay: 1.2s;
+}
+
+.live-dot {
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 9999px;
+	background: #22c55e;
+	animation: live-pulse 1.8s var(--motion-ease-standard) infinite;
+}
+
+.streaming-shell {
+	background: linear-gradient(
+		135deg,
+		rgba(255, 255, 255, 0.06) 0%,
+		rgba(245, 158, 11, 0.08) 100%
+	);
 }
 
 /* ───────────────────────────────────────────────
@@ -385,7 +442,9 @@ html {
 	.mesh-gradient,
 	.mesh-gradient-subtle,
 	.avatar-thinking,
-	.typing-indicator span {
+	.typing-indicator span,
+	.ambient-orb,
+	.live-dot {
 		animation: none !important;
 	}
 }

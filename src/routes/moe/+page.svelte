@@ -1,10 +1,11 @@
 <!-- src/routes/moe/+page.svelte - Billi AI Assistant -->
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { fly, scale } from 'svelte/transition';
+	import { fade, fly, scale } from 'svelte/transition';
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import MessageList from '$lib/components/MessageList.svelte';
 	import TimeEntryForm from '$lib/components/TimeEntryForm.svelte';
+	import PatchNotesSticky from '$lib/components/PatchNotesSticky.svelte';
 	import type { ChatMessage, ToolResultData } from '$lib/api/chat';
 	import { getSessionId, clearSessionId } from '$lib/stores/chat-persistence';
 
@@ -16,6 +17,7 @@
 	let isLoadingHistory = $state(true);
 	let sessionId = $state('');
 	let streamingContent = $state('');
+	let showPatchNotes = $state(false);
 
 	// Current mode indicator from classification
 	let currentMode = $state<'calendar' | 'billing' | 'assistant'>('assistant');
@@ -107,6 +109,45 @@
 			: slashCommands
 	);
 
+	const patchNotesSections = [
+		{
+			title: 'Core AI Upgrades',
+			items: [
+				'Refactored to modular intent + tool execution architecture in unified orchestration.',
+				'Added scoped prompt composition for calendar and billing paths.',
+				'Improved mixed-intent routing and stronger confidence-based expert selection.',
+				'Hardened time-entry execution so success is only reported after real submit.'
+			]
+		},
+		{
+			title: 'New Billing Flow',
+			items: [
+				'Added dedicated time-entry endpoint for structured form submissions.',
+				'Added employee/customer identity resolution with DB-backed QBO lookups.',
+				'Added developer test override support in dev mode for QA workflows.',
+				'Added stricter validation to block placeholder IDs and names.'
+			]
+		},
+		{
+			title: 'UI and UX',
+			items: [
+				'Added rich result cards: availability, team availability, booking, and time entry.',
+				'Added guided time-entry form with customer/project/date/hours/description controls.',
+				'Added slash commands, tool status indicators, and follow-up suggestion pills.',
+				'Improved scrolling, streaming, and loading behavior for smoother chat flow.'
+			]
+		},
+		{
+			title: 'Reliability and Context',
+			items: [
+				'Added conversation summarization to reduce token pressure on long threads.',
+				'Improved token-aware history truncation with safe tool-call grouping.',
+				'Expanded Eastern time/date utilities for safer natural-language scheduling.',
+				'Updated session history handling and Supabase-backed persistence paths.'
+			]
+		}
+	];
+
 	function getDistanceFromBottom(element: HTMLDivElement): number {
 		return element.scrollHeight - element.scrollTop - element.clientHeight;
 	}
@@ -126,6 +167,14 @@
 
 	function handleChatScroll() {
 		updateStickToBottom();
+	}
+
+	function togglePatchNotes() {
+		showPatchNotes = !showPatchNotes;
+	}
+
+	function closePatchNotes() {
+		showPatchNotes = false;
 	}
 
 	$effect(() => {
@@ -619,11 +668,21 @@
 	}
 
 	let modeConfig = $derived.by(() => getModeConfig(currentMode));
+	let modeSubLabel = $derived.by(() => {
+		if (!isLoading) return 'Online';
+		if (toolStatus?.label) return toolStatus.label;
+		return `Working in ${modeConfig.label.toLowerCase()} mode`;
+	});
 </script>
 
-<div class="flex flex-col h-screen">
+<div class="relative flex h-screen flex-col overflow-hidden mesh-gradient-subtle">
+	<div class="pointer-events-none absolute inset-0 dot-pattern opacity-30"></div>
+	<div class="ambient-orb ambient-orb-amber"></div>
+	<div class="ambient-orb ambient-orb-sky"></div>
+	<div class="ambient-orb ambient-orb-violet"></div>
+
 	<!-- Header -->
-	<header class="glass sticky top-0 z-10 px-6 py-4">
+	<header class="glass sticky top-0 z-20 border-b border-white/5 px-6 py-4">
 		<div class="max-w-4xl mx-auto flex justify-between items-center">
 			<div class="flex items-center gap-4">
 				<div class="flex items-center gap-3">
@@ -633,8 +692,19 @@
 						</svg>
 					</div>
 					<div>
-						<h1 class="text-xl font-bold text-white">Billi</h1>
-						<p class="text-xs text-slate-500">AI Assistant</p>
+						<button
+							type="button"
+							onclick={togglePatchNotes}
+							class="text-xl font-bold text-white hover:text-amber-300 transition-colors cursor-pointer"
+							aria-expanded={showPatchNotes}
+							aria-label="Toggle Billi patch notes"
+						>
+							Billi
+						</button>
+						<div class="mt-0.5 flex items-center gap-2">
+							<span class="live-dot"></span>
+							<p class="text-xs text-slate-400">{modeSubLabel}</p>
+						</div>
 					</div>
 				</div>
 
@@ -660,11 +730,35 @@
 			>
 				Clear Chat
 			</button>
+			<button
+				type="button"
+				onclick={togglePatchNotes}
+				class="ml-2 px-3 py-1.5 text-sm text-amber-300 hover:text-amber-200 glass border border-amber-500/30 rounded-lg transition-colors btn-press"
+				aria-label="Open Billi v1.1 patch notes"
+			>
+				v1.1 Notes
+			</button>
 		</div>
 	</header>
 
+	{#if showPatchNotes}
+		<div
+			class="fixed inset-0 z-30 flex items-start justify-center pt-24 px-4 bg-black/35 backdrop-blur-[1px]"
+			transition:fade={{ duration: 140 }}
+		>
+			<div transition:scale={{ duration: 180, start: 0.95, easing: cubicOut }}>
+				<PatchNotesSticky
+					version="v1.1"
+					releaseLabel="Billi Release"
+					sections={patchNotesSections}
+					onClose={closePatchNotes}
+				/>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Messages -->
-	<div bind:this={chatScrollElement} onscroll={handleChatScroll} class="flex-1 overflow-y-auto px-6 py-6">
+	<div bind:this={chatScrollElement} onscroll={handleChatScroll} class="relative z-10 flex-1 overflow-y-auto px-6 py-6">
 		<div class="max-w-4xl mx-auto">
 			{#if isLoadingHistory}
 				<div class="flex items-center justify-center py-12">
@@ -694,6 +788,7 @@
 					onQuickAction={handleQuickAction}
 					onSlotClick={handleSlotClick}
 					onSuggestionClick={handleSuggestionClick}
+					onPatchNotesClick={togglePatchNotes}
 				/>
 
 				{#if streamingContent}
@@ -710,7 +805,11 @@
 								</div>
 							</div>
 							<div class="max-w-[80%]">
-								<div class="glass-light rounded-2xl px-5 py-4 text-slate-200">
+								<div class="glass-light streaming-shell rounded-2xl px-5 py-4 text-slate-200">
+									<div class="mb-2 flex items-center gap-2 text-[11px] text-amber-300/90">
+										<span class="live-dot"></span>
+										<span>Billi is responding</span>
+									</div>
 									<div class="prose-chat text-sm max-w-none whitespace-pre-wrap">
 										{streamingContent}
 									</div>
@@ -725,7 +824,7 @@
 	</div>
 
 	<!-- Input -->
-	<div class="glass px-6 py-4">
+	<div class="glass sticky bottom-0 z-20 border-t border-white/8 px-6 py-4">
 		<div class="max-w-4xl mx-auto">
 			<!-- Slash command dropdown -->
 			{#if showSlashMenu && filteredSlashCommands.length > 0}
