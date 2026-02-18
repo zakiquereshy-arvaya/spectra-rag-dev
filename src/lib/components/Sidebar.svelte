@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { signOut } from '@auth/sveltekit/client';
 	import ArvayaLogo from '$lib/assets/ArvayaLogo.png';
+	import { isOpsAllowed } from '$lib/services/ops-access';
 
 	interface Props {
 		isOpen?: boolean;
@@ -11,6 +12,8 @@
 	}
 
 	let { isOpen = $bindable(true), session }: Props = $props();
+
+	let showOpsLink = $derived(isOpsAllowed(session?.user?.email));
 
 	// Main navigation
 	const mainNavItems = [
@@ -149,6 +152,40 @@
 					{/each}
 				</ul>
 			</div>
+
+			<!-- Ops Section (restricted) -->
+			{#if showOpsLink}
+				<div class="mt-8">
+					<p class="px-3 mb-3 text-xs font-semibold text-violet-400/70 uppercase tracking-wider">Operations</p>
+					<ul class="space-y-1">
+						<li>
+							<button
+								onclick={() => handleNavigate('/ops')}
+								class="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all duration-200 btn-press
+								       {isActive('/ops')
+										? 'bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 text-violet-300 shadow-lg shadow-violet-500/10 border border-violet-500/20'
+										: 'text-slate-300 hover:bg-white/[0.04] hover:text-violet-300'}"
+							>
+								<div class="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center relative
+								            {isActive('/ops')
+											? 'bg-gradient-to-br from-violet-500 to-fuchsia-600 shadow-lg shadow-violet-500/30'
+											: 'bg-gradient-to-br from-violet-500/20 to-fuchsia-600/20 text-violet-400'}">
+									<svg class="w-5 h-5 {isActive('/ops') ? 'text-white' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+									</svg>
+									{#if isActive('/ops')}
+										<span class="absolute -right-1 -top-1 w-2.5 h-2.5 rounded-full bg-violet-400 animate-glow-pulse"></span>
+									{/if}
+								</div>
+								<div>
+									<p class="font-medium">Ops Center</p>
+									<p class="text-xs {isActive('/ops') ? 'text-violet-400/70' : 'text-slate-500'}">Platform Intelligence</p>
+								</div>
+							</button>
+						</li>
+					</ul>
+				</div>
+			{/if}
 		</nav>
 
 		<!-- User Section -->

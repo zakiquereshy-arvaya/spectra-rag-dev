@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { MoERouter } from '$lib/services/moe-router';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
+import { logEvent } from '$lib/services/ops-logger';
 import {
 	OPENAI_API_KEY,
 	AUTH_MICROSOFT_ENTRA_ID_ID,
@@ -47,6 +48,15 @@ export const POST: RequestHandler = async (event) => {
 				headers: { 'Content-Type': 'application/json' },
 			});
 		}
+
+		logEvent({
+			user_email: session.user?.email ?? undefined,
+			user_name: session.user?.name ?? undefined,
+			event_type: 'chat_message',
+			event_action: 'send_message',
+			route: '/moe/stream',
+			metadata: { sessionId, messageLength: message.length },
+		});
 
 		// Get logged-in user information
 		const loggedInUser = session.user

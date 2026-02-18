@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { CohereClientV2 } from 'cohere-ai';
 import { DEFAULT_RAG_CONFIG, type RagConfig } from './rag-config';
+import { logRagMetrics } from './ops-logger';
 
 export type RagFilters = {
 	tenant_id?: string;
@@ -298,18 +299,58 @@ export class RagRetrievalService {
 		};
 	}
 
-	async retrieve(query: string, filters: RagFilters = {}): Promise<RagContext> {
+	async retrieve(query: string, filters: RagFilters = {}, userEmail?: string): Promise<RagContext> {
+		const t0 = performance.now();
+
 		const embedding = await this.embedQuery(query);
+		const tEmbed = performance.now();
+
 		const dense = await this.denseSearch(embedding, filters);
+		const tDense = performance.now();
+
 		const sparse = await this.sparseSearch(query, filters);
+		const tSparse = performance.now();
+
 		const merged = mergeCandidates(dense, sparse, {
 			dense: this.config.fusionWeightDense,
 			sparse: this.config.fusionWeightSparse,
 		});
 
 		const reranked = await this.rerank(query, merged);
-		const expanded = await this.expandNeighbors(reranked);
+		const tRerank = performance.now();
 
-		return this.buildContext(expanded);
+		const expanded = await this.expandNeighbors(reranked);
+		const context = this.buildContext(expanded);
+		const tTotal = performance.now();
+
+		// Compute rerank score stats
+		const rerankScores = reranked.map((c) => c.score_rerank ?? 0).filter((s) => s > 0);
+		const avgRerank = rerankScores.length > 0 ? rerankScores.reduce((a, b) => a + b, 0) / rerankScores.length : 0;
+		const maxRerank = rerankScores.length > 0 ? Math.max(...rerankScores) : 0;
+		const minRerank = rerankScores.length > 0 ? Math.min(...rerankScores) : 0;
+
+		// Estimate context tokens (~4 chars per token)
+		const contextTokenEstimate = Math.ceil(context.context.length / 4);
+
+		logRagMetrics({
+			query,
+			user_email: userEmail,
+			embed_ms: Math.round(tEmbed - t0),
+			dense_ms: Math.round(tDense - tEmbed),
+			sparse_ms: Math.round(tSparse - tDense),
+			rerank_ms: Math.round(tRerank - tSparse),
+			total_ms: Math.round(tTotal - t0),
+			dense_count: dense.length,
+			sparse_count: sparse.length,
+			fused_count: merged.length,
+			reranked_count: reranked.length,
+			final_count: context.chunks.length,
+			avg_rerank_score: Math.round(avgRerank * 1000) / 1000,
+			max_rerank_score: Math.round(maxRerank * 1000) / 1000,
+			min_rerank_score: Math.round(minRerank * 1000) / 1000,
+			context_token_estimate: contextTokenEstimate,
+		});
+
+		return context;
 	}
 }
