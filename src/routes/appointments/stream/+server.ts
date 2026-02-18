@@ -2,6 +2,7 @@ import type { RequestHandler } from './$types';
 import { MCPServer } from '$lib/services/mcp-server';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
+import { logEvent } from '$lib/services/ops-logger';
 import { OPENAI_API_KEY } from '$env/static/private';
 import {
 	AUTH_MICROSOFT_ENTRA_ID_ID,
@@ -44,6 +45,15 @@ export const POST: RequestHandler = async (event) => {
 
 		// Get session ID from request params or generate one
 		const sessionId = mcpRequest.params?.sessionId || 'default';
+
+		logEvent({
+			user_email: session.user?.email ?? undefined,
+			user_name: session.user?.name ?? undefined,
+			event_type: 'chat_message',
+			event_action: 'send_message',
+			route: '/appointments/stream',
+			metadata: { sessionId },
+		});
 
 		// Get logged-in user information
 		const loggedInUser = session.user

@@ -1,6 +1,7 @@
 // Fireflies Stream endpoint - RAG-powered meeting transcript Q&A
 import type { RequestHandler } from './$types';
 import { FirefliesAgent } from '$lib/services/fireflies-agent';
+import { logEvent } from '$lib/services/ops-logger';
 import { COHERE_API_KEY, VECTOR_DATABASE_URL } from '$env/static/private';
 
 export const POST: RequestHandler = async (event) => {
@@ -28,6 +29,15 @@ export const POST: RequestHandler = async (event) => {
 				headers: { 'Content-Type': 'application/json' },
 			});
 		}
+
+		logEvent({
+			user_email: session.user?.email ?? undefined,
+			user_name: session.user?.name ?? undefined,
+			event_type: 'chat_message',
+			event_action: 'send_message',
+			route: '/fireflies/stream',
+			metadata: { sessionId, messageLength: message.length },
+		});
 
 		// Create Fireflies Agent
 		const agent = new FirefliesAgent({

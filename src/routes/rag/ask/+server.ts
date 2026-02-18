@@ -4,6 +4,7 @@ import { CohereClientV2 } from 'cohere-ai';
 import { RAG_SYSTEM_PROMPT, RAG_VALIDATION_PROMPT } from '$lib/services/rag-prompts';
 import { RagRetrievalService } from '$lib/services/rag-retrieval';
 import { getRagConfig } from '$lib/services/rag-config';
+import { logEvent } from '$lib/services/ops-logger';
 import { COHERE_API_KEY, VECTOR_DATABASE_URL } from '$env/static/private';
 
 export const POST: RequestHandler = async (event) => {
@@ -27,12 +28,21 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'question is required' }, { status: 400 });
 		}
 
+		logEvent({
+			user_email: session.user?.email ?? undefined,
+			user_name: session.user?.name ?? undefined,
+			event_type: 'rag_query',
+			event_action: 'ask',
+			route: '/rag/ask',
+			metadata: { questionLength: question.length, hasFilters: !!filters },
+		});
+
 		const retrieval = new RagRetrievalService(
 			VECTOR_DATABASE_URL,
 			COHERE_API_KEY,
 			getRagConfig()
 		);
-		const { context, sources, chunks } = await retrieval.retrieve(question, filters || {});
+		const { context, sources, chunks } = await retrieval.retrieve(question, filters || {}, session.user?.email ?? undefined);
 
 		if (!context || chunks.length === 0) {
 			return json({
