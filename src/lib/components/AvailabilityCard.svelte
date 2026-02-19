@@ -85,6 +85,15 @@
 		showToday ? data.free_slots.filter((s) => timeToHour(s.end) > currentHour) : data.free_slots
 	);
 
+	let recommendedSlots = $derived.by(() =>
+		[...filteredFreeSlots]
+			.sort((a, b) => {
+				if (b.duration_hours !== a.duration_hours) return b.duration_hours - a.duration_hours;
+				return timeToHour(a.start) - timeToHour(b.start);
+			})
+			.slice(0, 3)
+	);
+
 	let busyHours = $derived.by(() => {
 		let total = 0;
 		for (const event of filteredBusyTimes) {
@@ -165,6 +174,23 @@
 	<!-- Free slots (always visible) -->
 	{#if filteredFreeSlots.length > 0}
 		<div class="px-5 py-3">
+			{#if recommendedSlots.length > 0}
+				<p class="text-xs font-semibold text-slate-300 mb-1.5">Recommended slots</p>
+				<div class="flex flex-wrap gap-1.5 mb-3">
+					{#each recommendedSlots as slot}
+						<button
+							class="px-2.5 py-1 rounded-lg text-xs font-medium
+							       bg-sky-500/10 text-sky-300 border border-sky-500/20
+							       hover:bg-sky-500/20 hover:border-sky-500/30
+							       transition-all cursor-pointer btn-press"
+							onclick={() => onSlotClick?.(`Book a meeting at ${slot.start}`)}
+						>
+							{slot.start} – {slot.end} <span class="text-sky-400/70 ml-0.5">· {slot.duration_hours}h</span>
+						</button>
+					{/each}
+				</div>
+				<p class="text-[11px] text-slate-500 mb-1.5">All available slots</p>
+			{/if}
 			<div class="flex flex-wrap gap-1.5">
 				{#each filteredFreeSlots as slot, i}
 					<button
