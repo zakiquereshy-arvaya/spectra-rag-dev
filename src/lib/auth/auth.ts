@@ -8,9 +8,13 @@ export const {handle} = SvelteKitAuth({
             clientId: AUTH_MICROSOFT_ENTRA_ID_ID,
             clientSecret: AUTH_MICROSOFT_ENTRA_ID_SECRET,
             issuer: AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+            allowDangerousEmailAccountLinking: true,
             authorization: {
                 params: {
-                    scope: 'openid profile email offline_access Calendars.ReadWrite User.Read.All',
+                    // Keep delegated scope minimal to avoid tenant-level consent failures.
+                    scope: 'openid profile email offline_access Calendars.ReadWrite User.Read',
+                    // Force account picker to avoid stale SSO account state after sign-out.
+                    prompt: 'select_account',
                 },
             },
         }),
