@@ -11,6 +11,8 @@ import {
 	AUTH_MICROSOFT_ENTRA_ID_ISSUER,
 	AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
 	BILLI_DEV_WEBHOOK_URL,
+	AZURE_EXISTING_AIPROJECT_ENDPOINT,
+	AZURE_EXISTING_AGENT_ID,
 } from '$env/static/private';
 
 export const POST: RequestHandler = async (event) => {
@@ -74,6 +76,8 @@ export const POST: RequestHandler = async (event) => {
 			accessToken: accessToken || undefined,
 			loggedInUser,
 			webhookUrl: BILLI_DEV_WEBHOOK_URL,
+			azureAgentEndpoint: AZURE_EXISTING_AIPROJECT_ENDPOINT,
+			azureAgentId: AZURE_EXISTING_AGENT_ID,
 		});
 
 		// Create streaming response

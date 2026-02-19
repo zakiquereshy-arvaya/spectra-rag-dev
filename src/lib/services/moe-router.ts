@@ -5,6 +5,7 @@ import { MoEClassifier, type ClassificationResult } from './moe-classifier';
 import { MCPServer } from './mcp-server';
 import { BillingMCPServer } from './billing-mcp-server';
 import { UnifiedMCPServer } from './unified-mcp-server';
+import { MondayAgentExpert, type McpApprovalDecision } from './monday-agent';
 import { MicrosoftGraphAuth } from './microsoft-graph-auth';
 import { getChatHistoryAsync } from './chat-history-store';
 import type { GenericChatMessage } from '$lib/utils/tokens';
@@ -20,7 +21,7 @@ export interface MoERequest {
 export interface MoEResponse {
 	content: string;
 	classification: ClassificationResult;
-	expert: 'appointments' | 'billing' | 'unified';
+	expert: 'appointments' | 'billing' | 'monday' | 'unified';
 }
 
 export interface MoERouterConfig {
@@ -30,6 +31,8 @@ export interface MoERouterConfig {
 	accessToken?: string;
 	loggedInUser?: { name: string; email: string };
 	webhookUrl?: string;
+	azureAgentEndpoint?: string;
+	azureAgentId?: string;
 }
 
 export class MoERouter {
@@ -37,6 +40,7 @@ export class MoERouter {
 	private appointmentsExpert: MCPServer | null = null;
 	private billingExpert: BillingMCPServer | null = null;
 	private unifiedExpert: UnifiedMCPServer | null = null;
+	private mondayExpert: MondayAgentExpert | null = null;
 	private config: MoERouterConfig;
 	private lastClassification: ClassificationResult | null = null;
 
@@ -93,6 +97,21 @@ export class MoERouter {
 		return this.unifiedExpert;
 	}
 
+	private getMondayExpert(): MondayAgentExpert {
+		if (!this.mondayExpert) {
+			const { azureAgentEndpoint, azureAgentId } = this.config;
+			if (!azureAgentEndpoint || !azureAgentId) {
+				throw new Error('Azure agent endpoint and agent ID must be configured for the Monday expert');
+			}
+			this.mondayExpert = new MondayAgentExpert(
+				azureAgentEndpoint,
+				azureAgentId,
+				this.config.openaiApiKey
+			);
+		}
+		return this.mondayExpert;
+	}
+
 	/**
 	 * Get the last classification result
 	 */
@@ -137,7 +156,10 @@ export class MoERouter {
 	/**
 	 * Determine which expert to use based on classification
 	 */
-	private determineExpert(classification: ClassificationResult): 'appointments' | 'billing' | 'unified' {
+	private determineExpert(classification: ClassificationResult): 'appointments' | 'billing' | 'monday' | 'unified' {
+		if (classification.category === 'monday') {
+			return 'monday';
+		}
 		if (classification.category === 'appointments') {
 			return 'appointments';
 		}
@@ -182,7 +204,9 @@ export class MoERouter {
 		console.log(`[MoE Router] Routing to ${expertType} expert (confidence: ${classification.confidence})`);
 
 		// Yield classification info for UI (optional metadata)
-		yield `[CLASSIFICATION:${JSON.stringify({ expert: expertType, category: classification.category, confidence: classification.confidence })}]\n`;
+		if (expertType !== 'monday') {
+			yield `[CLASSIFICATION:${JSON.stringify({ expert: expertType, category: classification.category, confidence: classification.confidence })}]\n`;
+		}
 
 		// Step 3: Route to the appropriate expert
 		try {
@@ -209,6 +233,18 @@ export class MoERouter {
 					break;
 				}
 
+				case 'monday': {
+					yield `[CLASSIFICATION:${JSON.stringify({ expert: 'monday', category: 'monday', confidence: classification.confidence })}]\n`;
+					const expert = this.getMondayExpert();
+					for await (const chunk of expert.handleRequestStream({ message, sessionId,
+						userEmail: this.config.loggedInUser?.email,
+						userName: this.config.loggedInUser?.name,
+					 })) {
+						yield chunk;
+					}
+					break;
+				}
+
 				case 'unified':
 				default: {
 					const expert = this.getUnifiedExpert();
@@ -225,12 +261,27 @@ export class MoERouter {
 	}
 
 	/**
+	 * Handle an MCP tool approval decision for the Monday expert.
+	 * Returns an async generator that yields the continuation (text or another approval marker).
+	 */
+	async *handleMondayApproval(decision: McpApprovalDecision): AsyncGenerator<string> {
+		const expert = this.getMondayExpert();
+		yield `[CLASSIFICATION:${JSON.stringify({ expert: 'monday', category: 'monday', confidence: 1 })}]\n`;
+		for await (const chunk of expert.handleApprovalStream(decision)) {
+			yield chunk;
+		}
+	}
+
+	/**
 	 * Clear history for all experts
 	 */
 	clearHistory(): void {
 		this.appointmentsExpert?.clearHistory();
 		this.billingExpert?.clearHistory();
 		this.unifiedExpert?.clearHistory();
+		if (this.mondayExpert) {
+			this.mondayExpert.clearThread(this.config.sessionId);
+		}
 	}
 }
 

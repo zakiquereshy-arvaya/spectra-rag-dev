@@ -6,8 +6,10 @@
 	import MessageList from '$lib/components/MessageList.svelte';
 	import TimeEntryForm from '$lib/components/TimeEntryForm.svelte';
 	import PatchNotesSticky from '$lib/components/PatchNotesSticky.svelte';
+	import McpApprovalCard from '$lib/components/McpApprovalCard.svelte';
 	import type { ChatMessage, ToolResultData } from '$lib/api/chat';
 	import { getSessionId, clearSessionId } from '$lib/stores/chat-persistence';
+	import { formatMessageWithMarkdown } from '$lib/utils/sanitize';
 
 	let { data }: { data: PageData } = $props();
 
@@ -20,7 +22,7 @@
 	let showPatchNotes = $state(false);
 
 	// Current mode indicator from classification
-	let currentMode = $state<'calendar' | 'billing' | 'assistant'>('assistant');
+	let currentMode = $state<'calendar' | 'billing' | 'assistant' | 'monday'>('assistant');
 	let currentConfidence = $state<number>(0);
 
 	// Time entry form state
@@ -32,6 +34,30 @@
 
 	// Collected tool results during streaming
 	let pendingToolResult = $state<ToolResultData | null>(null);
+
+	// MCP tool approval state
+	interface McpApprovalData {
+		conversationId: string;
+		responseId: string;
+		approvalRequestId: string;
+		toolName: string;
+		serverLabel: string;
+		arguments: Record<string, unknown>;
+	}
+	let pendingMcpApproval = $state<McpApprovalData | null>(null);
+	let mcpApprovalProcessing = $state(false);
+	let accumulatedContent = $state('');
+
+	function loadAlwaysAllowedTools(): Set<string> {
+		try {
+			const stored = sessionStorage.getItem('mcp_always_allowed_tools');
+			return stored ? new Set(JSON.parse(stored)) : new Set();
+		} catch { return new Set(); }
+	}
+	function saveAlwaysAllowedTools(tools: Set<string>) {
+		try { sessionStorage.setItem('mcp_always_allowed_tools', JSON.stringify([...tools])); } catch {}
+	}
+	let alwaysAllowedTools = $state<Set<string>>(new Set());
 
 	// Slash command dropdown
 	let showSlashMenu = $state(false);
@@ -97,6 +123,9 @@
 		{ command: '/log', label: 'Log Time', description: 'Log hours for a project', action: 'log_time' },
 		{ command: '/availability', label: 'Check Availability', description: 'Check someone\'s calendar', action: 'check_availability' },
 		{ command: '/book', label: 'Book Meeting', description: 'Schedule a Teams meeting', action: 'book_meeting' },
+		{ command: '/monday', label: 'Monday Updates', description: 'View action items from Monday.com', action: 'monday_updates' },
+		{ command: '/tasks', label: 'My Tasks', description: 'Show my assigned action items', action: 'monday_tasks' },
+		{ command: '/boards', label: 'Monday Boards', description: 'List boards and recent updates', action: 'monday_boards' },
 	];
 
 	let filteredSlashCommands = $derived.by(() =>
@@ -111,39 +140,39 @@
 
 	const patchNotesSections = [
 		{
-			title: 'Core AI Upgrades',
+			title: 'Monday Expert + Routing',
 			items: [
-				'Refactored to modular intent + tool execution architecture in unified orchestration.',
-				'Added scoped prompt composition for calendar and billing paths.',
-				'Improved mixed-intent routing and stronger confidence-based expert selection.',
-				'Hardened time-entry execution so success is only reported after real submit.'
+				'Added a dedicated Monday expert path in the MoE router with Azure Foundry agent support.',
+				'Extended intent classification with a new monday category and task/board-focused pattern matching.',
+				'Wired stream config to pass Azure agent endpoint/id through the /moe pipeline.',
+				'Added Monday quick commands and actions for updates, assigned tasks, and board summaries.'
 			]
 		},
 		{
-			title: 'New Billing Flow',
+			title: 'MCP Approval Workflow',
 			items: [
-				'Added dedicated time-entry endpoint for structured form submissions.',
-				'Added employee/customer identity resolution with DB-backed QBO lookups.',
-				'Added developer test override support in dev mode for QA workflows.',
-				'Added stricter validation to block placeholder IDs and names.'
+				'Added an interactive approval card for MCP tool calls with Allow Once, Always Allow, and Deny actions.',
+				'Built a new /moe/approve SSE endpoint to continue Monday conversations after approval decisions.',
+				'Added auto-approve support for user-saved always-allowed tools via session storage.',
+				'Implemented multi-round approval handling so nested tool approvals can continue cleanly.'
 			]
 		},
 		{
-			title: 'UI and UX',
+			title: 'Monday + Message Experience',
 			items: [
-				'Added rich result cards: availability, team availability, booking, and time entry.',
-				'Added guided time-entry form with customer/project/date/hours/description controls.',
-				'Added slash commands, tool status indicators, and follow-up suggestion pills.',
-				'Improved scrolling, streaming, and loading behavior for smoother chat flow.'
+				'Added a structured Monday report card that parses markdown sections into an accordion view.',
+				'Improved message bubbles with long-response collapse/expand controls for large assistant replies.',
+				'Expanded quick-action landing state with Monday prompts and richer empty-state guidance.',
+				'Updated availability and team availability cards with denser summaries and expandable timeline/detail views.'
 			]
 		},
 		{
-			title: 'Reliability and Context',
+			title: 'Markdown + Visual Polish',
 			items: [
-				'Added conversation summarization to reduce token pressure on long threads.',
-				'Improved token-aware history truncation with safe tool-call grouping.',
-				'Expanded Eastern time/date utilities for safer natural-language scheduling.',
-				'Updated session history handling and Supabase-backed persistence paths.'
+				'Upgraded message rendering from basic formatting to full markdown via marked + DOMPurify sanitization.',
+				'Added comprehensive prose styles for headings, lists, tables, blockquotes, links, and details blocks.',
+				'Applied markdown rendering to streaming responses for consistent in-progress output formatting.',
+				'Added supporting dependencies for Azure agent integration and markdown sanitization.'
 			]
 		}
 	];
@@ -176,6 +205,10 @@
 	function closePatchNotes() {
 		showPatchNotes = false;
 	}
+
+	$effect(() => {
+		alwaysAllowedTools = loadAlwaysAllowedTools();
+	});
 
 	$effect(() => {
 		sessionId = getSessionId('moe');
@@ -241,6 +274,9 @@
 			streamingContent = '';
 			currentMode = 'assistant';
 			currentConfidence = 0;
+			pendingMcpApproval = null;
+			mcpApprovalProcessing = false;
+			accumulatedContent = '';
 		}
 	}
 
@@ -303,6 +339,9 @@
 		currentConfidence = 0;
 		toolStatus = null;
 		pendingToolResult = null;
+		pendingMcpApproval = null;
+		mcpApprovalProcessing = false;
+		accumulatedContent = '';
 		showSlashMenu = false;
 		resetTextareaHeight();
 
@@ -353,7 +392,8 @@
 										const classification = JSON.parse(classificationMatch[1]);
 										currentConfidence = classification.confidence;
 										currentMode = classification.expert === 'appointments' ? 'calendar'
-											: classification.expert === 'billing' ? 'billing' : 'assistant';
+											: classification.expert === 'billing' ? 'billing'
+											: classification.expert === 'monday' ? 'monday' : 'assistant';
 									} catch {}
 									chunk = chunk.replace(/\[CLASSIFICATION:.+?\]\n?/, '');
 								}
@@ -379,6 +419,17 @@
 									chunk = stripMarker(chunk, 'TOOL_RESULT');
 								}
 
+								// Parse MCP_APPROVAL markers from Monday agent
+								const approvalJson = extractMarkerJson(chunk, 'MCP_APPROVAL');
+								if (approvalJson) {
+									try {
+										const approval = JSON.parse(approvalJson[0]) as McpApprovalData;
+										pendingMcpApproval = approval;
+										accumulatedContent = fullContent;
+									} catch {}
+									chunk = stripMarker(chunk, 'MCP_APPROVAL');
+								}
+
 								if (chunk) {
 									fullContent += chunk;
 									streamingContent = fullContent;
@@ -397,14 +448,20 @@
 				}
 			}
 
-			fullContent = fullContent.replace(/\[CLASSIFICATION:.+?\]\n?/g, '');
-			fullContent = fullContent.replace(/\[Processing.*?\]\n*/g, '');
-			// Strip any remaining markers using bracket-balanced removal
-			while (fullContent.includes('[TOOL_STATUS:')) {
-				fullContent = stripMarker(fullContent, 'TOOL_STATUS');
-			}
-			while (fullContent.includes('[TOOL_RESULT:')) {
-				fullContent = stripMarker(fullContent, 'TOOL_RESULT');
+			fullContent = cleanStreamContent(fullContent);
+
+			// If an MCP approval is pending, don't finalize the message yet
+			if (pendingMcpApproval) {
+				streamingContent = '';
+				toolStatus = null;
+
+				// Auto-approve if tool is in always-allowed list
+				if (alwaysAllowedTools.has(pendingMcpApproval.toolName)) {
+					await sendApproval(true, false);
+				} else {
+					isLoading = false;
+				}
+				return;
 			}
 
 			const assistantMessage: ChatMessage = {
@@ -434,6 +491,150 @@
 		} finally {
 			isLoading = false;
 			pendingToolResult = null;
+			textareaElement?.focus();
+		}
+	}
+
+	function cleanStreamContent(text: string): string {
+		text = text.replace(/\[CLASSIFICATION:.+?\]\n?/g, '');
+		text = text.replace(/\[Processing.*?\]\n*/g, '');
+		while (text.includes('[TOOL_STATUS:')) text = stripMarker(text, 'TOOL_STATUS');
+		while (text.includes('[TOOL_RESULT:')) text = stripMarker(text, 'TOOL_RESULT');
+		while (text.includes('[MCP_APPROVAL:')) text = stripMarker(text, 'MCP_APPROVAL');
+		return text;
+	}
+
+	/**
+	 * Process an SSE response stream from the approve endpoint.
+	 * Returns { content, approval } -- if approval is non-null another round is needed.
+	 */
+	async function processApprovalStream(response: Response): Promise<{ content: string; approval: McpApprovalData | null }> {
+		if (!response.body) throw new Error('Response body is null');
+
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder();
+		let buffer = '';
+		let fullContent = '';
+		let approval: McpApprovalData | null = null;
+
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+
+			buffer += decoder.decode(value, { stream: true });
+			const lines = buffer.split('\n\n');
+			buffer = lines.pop() || '';
+
+			for (const line of lines) {
+				if (!line.startsWith('data: ')) continue;
+				try {
+					const data = JSON.parse(line.slice(6));
+					if (data.chunk) {
+						let chunk = data.chunk;
+
+						const classificationMatch = chunk.match(/\[CLASSIFICATION:(.+?)\]/);
+						if (classificationMatch) {
+							try {
+								const cls = JSON.parse(classificationMatch[1]);
+								currentConfidence = cls.confidence;
+								currentMode = cls.expert === 'monday' ? 'monday' : 'assistant';
+							} catch {}
+							chunk = chunk.replace(/\[CLASSIFICATION:.+?\]\n?/, '');
+						}
+
+						const approvalJson = extractMarkerJson(chunk, 'MCP_APPROVAL');
+						if (approvalJson) {
+							try { approval = JSON.parse(approvalJson[0]) as McpApprovalData; } catch {}
+							chunk = stripMarker(chunk, 'MCP_APPROVAL');
+						}
+
+						if (chunk) {
+							fullContent += chunk;
+							streamingContent = accumulatedContent + fullContent;
+						}
+					} else if (data.error) {
+						throw new Error(data.error);
+					} else if (data.done) {
+						break;
+					}
+				} catch (e: any) {
+					if (e.message && e.message !== 'Unexpected end of JSON input') throw e;
+				}
+			}
+		}
+
+		return { content: cleanStreamContent(fullContent), approval };
+	}
+
+	async function sendApproval(approve: boolean, alwaysAllow: boolean) {
+		if (!pendingMcpApproval) return;
+
+		if (alwaysAllow) {
+			alwaysAllowedTools = new Set([...alwaysAllowedTools, pendingMcpApproval.toolName]);
+			saveAlwaysAllowedTools(alwaysAllowedTools);
+		}
+
+		const approvalData = pendingMcpApproval;
+		pendingMcpApproval = null;
+		mcpApprovalProcessing = true;
+		isLoading = true;
+		toolStatus = approve ? { tool: approvalData.toolName, label: `Running ${approvalData.toolName.replace(/_/g, ' ')}...` } : null;
+
+		try {
+			const response = await fetch('/moe/approve', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					sessionId,
+					conversationId: approvalData.conversationId,
+					responseId: approvalData.responseId,
+					approvalRequestId: approvalData.approvalRequestId,
+					approve,
+					reason: approve ? 'User approved' : 'User denied',
+				}),
+			});
+
+			if (!response.ok) throw new Error(`Approval request failed: ${response.statusText}`);
+
+			const { content, approval } = await processApprovalStream(response);
+			accumulatedContent += content;
+
+			if (approval) {
+				pendingMcpApproval = approval;
+				mcpApprovalProcessing = false;
+				toolStatus = null;
+
+				if (alwaysAllowedTools.has(approval.toolName)) {
+					await sendApproval(true, false);
+				} else {
+					isLoading = false;
+				}
+				return;
+			}
+
+			const assistantMessage: ChatMessage = {
+				role: 'assistant',
+				content: accumulatedContent || (approve ? 'Done.' : 'Tool call was denied.'),
+				timestamp: new Date().toISOString(),
+			};
+			messages = [...messages, assistantMessage];
+			streamingContent = '';
+			accumulatedContent = '';
+		} catch (error: any) {
+			const errorMessage: ChatMessage = {
+				role: 'assistant',
+				content: `Error: ${error.message || 'Failed to process tool approval'}`,
+				timestamp: new Date().toISOString(),
+			};
+			messages = [...messages, errorMessage];
+			streamingContent = '';
+			accumulatedContent = '';
+		} finally {
+			mcpApprovalProcessing = false;
+			toolStatus = null;
+			if (!pendingMcpApproval) {
+				isLoading = false;
+			}
 			textareaElement?.focus();
 		}
 	}
@@ -616,11 +817,18 @@
 				inputMessage = "Book a meeting with ";
 				textareaElement?.focus();
 				break;
+			case 'monday_updates':
+				sendMessage("Show me the latest updates and action items from Monday.com");
+				break;
+			case 'monday_tasks':
+				sendMessage("Show my assigned action items on Monday.com");
+				break;
+			case 'monday_boards':
+				sendMessage("List the Monday.com boards and their recent updates");
+				break;
 			default:
-				// If it's a full message (from suggestion pills), just send or pre-fill it
-				if (action.length > 20) {
+				if (action.length > 15) {
 					if (action.endsWith(' ')) {
-						// Pre-fill (ends with space = needs more input)
 						inputMessage = action;
 						textareaElement?.focus();
 					} else {
@@ -644,7 +852,7 @@
 		handleQuickAction(action);
 	}
 
-	function getModeConfig(mode: 'calendar' | 'billing' | 'assistant') {
+	function getModeConfig(mode: 'calendar' | 'billing' | 'assistant' | 'monday') {
 		switch (mode) {
 			case 'calendar':
 				return {
@@ -657,6 +865,12 @@
 					label: 'Time Entry',
 					icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
 					color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+				};
+			case 'monday':
+				return {
+					label: 'Monday.com',
+					icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2',
+					color: 'text-red-400 bg-red-500/10 border-red-500/20'
 				};
 			default:
 				return {
@@ -734,9 +948,9 @@
 				type="button"
 				onclick={togglePatchNotes}
 				class="ml-2 px-3 py-1.5 text-sm text-amber-300 hover:text-amber-200 glass border border-amber-500/30 rounded-lg transition-colors btn-press"
-				aria-label="Open Billi v1.1 patch notes"
+				aria-label="Open Billi v1.2 patch notes"
 			>
-				v1.1 Notes
+				v1.2 Notes
 			</button>
 		</div>
 	</header>
@@ -748,7 +962,7 @@
 		>
 			<div transition:scale={{ duration: 180, start: 0.95, easing: cubicOut }}>
 				<PatchNotesSticky
-					version="v1.1"
+					version="v1.2"
 					releaseLabel="Billi Release"
 					sections={patchNotesSections}
 					onClose={closePatchNotes}
@@ -804,19 +1018,33 @@
 									</svg>
 								</div>
 							</div>
-							<div class="max-w-[80%]">
+							<div class="max-w-[85%]">
 								<div class="glass-light streaming-shell rounded-2xl px-5 py-4 text-slate-200">
 									<div class="mb-2 flex items-center gap-2 text-[11px] text-amber-300/90">
 										<span class="live-dot"></span>
 										<span>Billi is responding</span>
 									</div>
-									<div class="prose-chat text-sm max-w-none whitespace-pre-wrap">
-										{streamingContent}
+									<div class="prose-chat text-sm max-w-none">
+										{@html formatMessageWithMarkdown(streamingContent)}
 									</div>
 									<span class="inline-block w-2 h-5 bg-amber-500 rounded-full animate-pulse ml-1"></span>
 								</div>
 							</div>
 						</div>
+					</div>
+				{/if}
+
+				{#if pendingMcpApproval}
+					<div class="py-3 max-w-[85%]">
+						<McpApprovalCard
+							toolName={pendingMcpApproval.toolName}
+							serverLabel={pendingMcpApproval.serverLabel}
+							args={pendingMcpApproval.arguments}
+							isProcessing={mcpApprovalProcessing}
+							onApprove={() => sendApproval(true, false)}
+							onAlwaysAllow={() => sendApproval(true, true)}
+							onDeny={() => sendApproval(false, false)}
+						/>
 					</div>
 				{/if}
 			{/if}

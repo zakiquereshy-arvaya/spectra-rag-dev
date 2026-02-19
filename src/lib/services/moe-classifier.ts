@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import type { ChatMessage } from './openai-service';
 
 export interface ClassificationResult {
-	category: 'appointments' | 'billing' | 'general';
+	category: 'appointments' | 'billing' | 'general' | 'monday';
 	confidence: number; // 0.0 to 1.0
 	reasoning?: string;
 }
@@ -29,11 +29,12 @@ export class MoEClassifier {
 		message: string,
 		chatHistory?: ChatMessage[]
 	): Promise<ClassificationResult> {
-		const systemPrompt = `You are an intent classifier for Arvaya AI & Automations. Your job is to categorize user messages into one of three categories.
+		const systemPrompt = `You are an intent classifier for Arvaya AI & Automations. Your job is to categorize user messages into one of four categories.
 
 Categories:
 - "appointments": Calendar, meetings, scheduling, availability checks, booking rooms, finding free time slots, Microsoft Calendar operations. IMPORTANT: Only classify as "appointments" if the user wants to SCHEDULE or BOOK a meeting. If "meeting" appears in a task description for time logging, it's "billing".
 - "billing": Time entries, logging hours, work tracking, QuickBooks, invoicing, customers/clients for billing, recording tasks completed. This includes messages like "log X hours for customer, tasks: did Y before meeting" - the word "meeting" here is part of the task description, not a request to book a meeting.
+- "monday": Monday.com board management, task creation, status updates, item assignment, column updates, sprint tracking, project management inside Monday.com.
 - "general": Greetings, questions about capabilities, unclear intent, mixed requests, or anything that doesn't clearly fit appointments or billing
 
 CRITICAL RULE: If a message contains time entry indicators (customer, hours, tasks, description, "log", "record", "submit") AND mentions "meeting", prioritize "billing" unless the message explicitly asks to schedule/book a meeting.
@@ -51,7 +52,7 @@ Instructions:
 
 Return ONLY valid JSON in this format:
 {
-  "category": "appointments" | "billing" | "general",
+  "category": "appointments" | "billing" | "general" | "monday",
   "confidence": 0.0-1.0,
   "reasoning": "brief explanation"
 }`;
@@ -135,9 +136,9 @@ Return ONLY the JSON classification.`;
 			const parsed = JSON.parse(text);
 
 			// Validate category
-			const validCategories = ['appointments', 'billing', 'general'];
+			const validCategories = ['appointments', 'billing', 'general', 'monday'];
 			const category = validCategories.includes(parsed.category)
-				? (parsed.category as 'appointments' | 'billing' | 'general')
+				? (parsed.category as 'appointments' | 'billing' | 'general' | 'monday')
 				: 'general';
 
 			// Validate confidence (ensure it's between 0 and 1)
@@ -210,6 +211,44 @@ Return ONLY the JSON classification.`;
 						reasoning: 'Pattern match: billing-related keywords with time entry context',
 					};
 				}
+			}
+		}
+
+		// Monday intent patterns - place BEFORE appointment patterns
+		const mondayPatterns = [
+			// Direct Monday references
+			/\b(monday\.com|monday\s+board|monday\s+item|monday\s+task|action\s*items?\s*board)\b/i,
+
+			// Project-centric asks (matches your Parent Project usage)
+			/\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?|parent\s+project|project\s+status|status\s+of\s+project)\b/i,
+
+			// Lane/group semantics used in your board
+			/\b(prep|backlog(?:\s*-\s*kitchen)?|current\s+plate|completed)\b.*\b(items?|tasks?|status|updates?)\b/i,
+			/\b(items?|tasks?)\b.*\b(prep|backlog(?:\s*-\s*kitchen)?|current\s+plate|completed)\b/i,
+
+			// Insight / pulse style asks
+			/\b(leadership\s+pulse|pulse|summary|overview|insights?|what('s|\s+is)\s+going\s+on|how\s+are\s+things\s+going)\b/i,
+			/\b(workload|owner|assigned|unassigned|blockers?|due\s+date|priority)\b/i,
+
+			// Update/history asks (maps to get_recent_updates / latest_update)
+			/\b(recent\s+updates?|latest\s+updates?|what\s+changed|update\s+history|progress)\b/i,
+
+			// Search / retrieval asks over board data
+			/\b(show|list|find|search|get)\b.*\b(items?|tasks?|projects?|updates?|status)\b/i,
+
+			// Task operation intents
+			/\b(create|update|add|assign|move|change\s+status|set\s+status)\b.*\b(task|item|board|column|group|pulse)\b/i,
+			/\bstatus\s+(update|change|set)\b/i,
+			/\bassign\s+(to|task)\b/i,
+		];
+
+		for (const pattern of mondayPatterns) {
+			if (pattern.test(lower)) {
+				return {
+					category: 'monday',
+					confidence: 0.92,
+					reasoning: 'Pattern match: Monday.com project/task management',
+				};
 			}
 		}
 

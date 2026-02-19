@@ -7,6 +7,7 @@
 	import TeamAvailabilityCard from './TeamAvailabilityCard.svelte';
 	import BookingCard from './BookingCard.svelte';
 	import TimeEntryCard from './TimeEntryCard.svelte';
+	import MondayReportCard from './MondayReportCard.svelte';
 
 	let {
 		message,
@@ -27,9 +28,34 @@
 		}).format(date);
 	}
 
+	/**
+	 * Detect if assistant content is a structured Monday.com report.
+	 * Must have 2+ headings AND Monday-specific language in the headings or body.
+	 * Never triggers when a toolResult is present (those have their own cards).
+	 */
+	function isMondayReport(text: string, hasToolResult: boolean): boolean {
+		if (!text || hasToolResult) return false;
+		const headings = text.match(/^#{1,4}\s+.+/gm);
+		if (!headings || headings.length < 2) return false;
+
+		const mondaySignals = /monday|action.?item|board|update.*overview|risk.*blocker|blocked|backlog|current.?plate|prep|kitchen/i;
+		const headingText = headings.join(' ');
+		return mondaySignals.test(headingText) || mondaySignals.test(text.slice(0, 300));
+	}
+
 	let hasCard = $derived(!!message.toolResult);
 	let hasSuggestions = $derived(!!message.suggestions && message.suggestions.length > 0);
 	let entranceDelay = $derived.by(() => Math.min(index * 36, 220));
+	let showMondayCard = $derived(message.role === 'assistant' && isMondayReport(message.content, hasCard));
+
+	let collapsed = $state(false);
+	let contentTooLong = $derived(message.role === 'assistant' && !showMondayCard && message.content.length > 800);
+	let displayContent = $derived.by(() => {
+		if (!contentTooLong || !collapsed) return message.content;
+		const cut = message.content.slice(0, 600);
+		const lastNewline = cut.lastIndexOf('\n');
+		return (lastNewline > 400 ? cut.slice(0, lastNewline) : cut) + '\n\n...';
+	});
 </script>
 
 <div
@@ -45,7 +71,6 @@
 	<!-- Assistant avatar -->
 	{#if message.role === 'assistant'}
 		<div class="flex-shrink-0 mr-3 mt-1">
-			<!-- Billi SVG Avatar -->
 			<div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20 relative">
 				<svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -54,7 +79,7 @@
 		</div>
 	{/if}
 
-	<div class="max-w-[80%] space-y-2">
+	<div class="max-w-[85%] space-y-2">
 		<!-- Rich card (if present) -->
 		{#if hasCard && message.toolResult}
 			<div in:scale={{ start: 0.98, duration: 220, easing: cubicOut }}>
@@ -72,8 +97,13 @@
 			</div>
 		{/if}
 
+		<!-- Monday.com report card (collapsible accordion) -->
+		{#if showMondayCard}
+			<MondayReportCard content={message.content} />
+		{/if}
+
 		<!-- Text content bubble -->
-		{#if message.content.trim()}
+		{#if message.content.trim() && !showMondayCard}
 			<div
 				class="rounded-2xl px-4 py-3 {
 					message.role === 'user'
@@ -81,9 +111,23 @@
 						: 'glass-light text-slate-100 border border-white/10'
 				}"
 			>
-				<div class="text-sm whitespace-pre-wrap break-words prose-chat">
-					{@html formatMessageWithMarkdown(message.content)}
+				<div class="text-sm break-words {message.role === 'assistant' ? 'prose-chat' : 'whitespace-pre-wrap'}">
+					{#if message.role === 'assistant'}
+						{@html formatMessageWithMarkdown(displayContent)}
+					{:else}
+						{message.content}
+					{/if}
 				</div>
+
+				{#if contentTooLong}
+					<button
+						class="mt-2 text-xs text-amber-400 hover:text-amber-300 transition-colors"
+						onclick={() => collapsed = !collapsed}
+					>
+						{collapsed ? 'Show full response' : 'Show less'}
+					</button>
+				{/if}
+
 				<div
 					class="text-[10px] mt-1.5 {
 						message.role === 'user' ? 'text-amber-100/70' : 'text-slate-500'

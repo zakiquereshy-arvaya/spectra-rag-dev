@@ -1,11 +1,35 @@
 /**
- * HTML Sanitization Utilities
- * Prevents XSS attacks by escaping HTML entities
+ * HTML Sanitization & Markdown Rendering
+ * Uses `marked` for full markdown and `DOMPurify` to prevent XSS.
  */
+import { Marked } from 'marked';
+import { browser } from '$app/environment';
 
-/**
- * Escape HTML entities to prevent XSS
- */
+const marked = new Marked({
+	breaks: true,
+	gfm: true,
+});
+
+const ALLOWED_TAGS = [
+	'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+	'p', 'br', 'hr',
+	'ul', 'ol', 'li',
+	'strong', 'em', 'del', 's',
+	'code', 'pre',
+	'blockquote',
+	'a',
+	'table', 'thead', 'tbody', 'tr', 'th', 'td',
+	'span', 'div', 'sup', 'sub',
+	'details', 'summary',
+];
+
+const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'title'];
+
+let DOMPurify: typeof import('dompurify').default | null = null;
+if (browser) {
+	import('dompurify').then((m) => { DOMPurify = m.default; });
+}
+
 export function escapeHtml(unsafe: string): string {
 	return unsafe
 		.replace(/&/g, '&amp;')
@@ -15,39 +39,25 @@ export function escapeHtml(unsafe: string): string {
 		.replace(/'/g, '&#039;');
 }
 
-/**
- * Format message content safely for display
- * Escapes HTML entities first, then converts newlines to <br>
- */
 export function formatMessageSafe(content: string): string {
-	// First escape any HTML to prevent XSS
 	const escaped = escapeHtml(content);
-	// Then convert newlines to <br> tags
 	return escaped.replace(/\n/g, '<br>');
 }
 
 /**
- * Format message with markdown-like formatting (safe)
- * Supports: **bold**, *italic*, `code`, ```code blocks```
+ * Render full markdown with safe HTML output.
+ * DOMPurify sanitizes when available (browser); on server the raw HTML is
+ * returned (only consumed by {@html} in client-hydrated components).
  */
 export function formatMessageWithMarkdown(content: string): string {
-	// First escape HTML
-	let formatted = escapeHtml(content);
+	if (!content) return '';
 
-	// Convert code blocks (```code```) - must be done before inline code
-	formatted = formatted.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+	const raw = marked.parse(content);
+	const html = typeof raw === 'string' ? raw : '';
 
-	// Convert inline code (`code`)
-	formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
+	if (DOMPurify) {
+		return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ADD_ATTR: ['target'] });
+	}
 
-	// Convert bold (**text**)
-	formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-	// Convert italic (*text*)
-	formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-	// Convert newlines to <br> (but not inside pre blocks)
-	formatted = formatted.replace(/\n/g, '<br>');
-
-	return formatted;
+	return html;
 }
