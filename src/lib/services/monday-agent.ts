@@ -1,5 +1,7 @@
 import { AIProjectClient } from '@azure/ai-projects';
-import { DefaultAzureCredential } from '@azure/identity';
+import { DefaultAzureCredential, ClientSecretCredential } from '@azure/identity';
+import type { TokenCredential } from '@azure/core-auth';
+import { env } from '$env/dynamic/private';
 import { OpenAIService } from './openai-service';
 
 export interface MondayAgentRequest {
@@ -47,11 +49,41 @@ export class MondayAgentExpert {
 	private openAIService: OpenAIService | null = null;
 
 	constructor(endpoint: string, agentName: string, openaiApiKey?: string) {
-		this.client = new AIProjectClient(endpoint, new DefaultAzureCredential());
+		const credential = MondayAgentExpert.buildCredential();
+		this.client = new AIProjectClient(endpoint, credential);
 		this.agentName = agentName.trim();
 		if (openaiApiKey?.trim()) {
 			this.openAIService = new OpenAIService(openaiApiKey.trim());
 		}
+	}
+
+	/**
+	 * Build a TokenCredential for the Azure AI Projects client.
+	 * Prefers explicit ClientSecretCredential from env vars (works in deployed
+	 * environments without Azure CLI). Falls back to DefaultAzureCredential
+	 * for local dev (az login, VS Code, managed identity, etc.).
+	 */
+	private static buildCredential(): TokenCredential {
+		const tenantId = env.AZURE_TENANT_ID || env.AUTH_MICROSOFT_ENTRA_ID_TENANT_ID;
+		const clientId = env.AZURE_CLIENT_ID || env.AUTH_MICROSOFT_ENTRA_ID_ID;
+		const clientSecret = env.AZURE_CLIENT_SECRET || env.AUTH_MICROSOFT_ENTRA_ID_SECRET;
+		const isProduction = (env.NODE_ENV || process.env.NODE_ENV) === 'production';
+
+		if (tenantId && clientId && clientSecret) {
+			console.log('[MondayAgent] Using ClientSecretCredential for authentication');
+			return new ClientSecretCredential(tenantId, clientId, clientSecret);
+		}
+
+		if (isProduction) {
+			throw new Error(
+				`[MondayAgent] Missing Azure client credentials in environment. ` +
+				`Set either AZURE_TENANT_ID/AZURE_CLIENT_ID/AZURE_CLIENT_SECRET ` +
+				`or AUTH_MICROSOFT_ENTRA_ID_TENANT_ID/AUTH_MICROSOFT_ENTRA_ID_ID/AUTH_MICROSOFT_ENTRA_ID_SECRET.`
+			);
+		}
+
+		console.log('[MondayAgent] Falling back to DefaultAzureCredential');
+		return new DefaultAzureCredential();
 	}
 
 	private async getAgentDisplayName(): Promise<string> {
