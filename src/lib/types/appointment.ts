@@ -1,4 +1,3 @@
-// Appointment Booking Types
 
 export interface AppointmentSlot {
 	start: string; // ISO 8601 datetime
