@@ -40,7 +40,8 @@ Categories:
 
 CRITICAL RULE: If a message contains time entry indicators (customer, hours, tasks, description, "log", "record", "submit") AND mentions "meeting", prioritize "billing" unless the message explicitly asks to schedule/book a meeting.
 CRITICAL RULE: If a message clearly asks for BOTH calendar actions and time entry logging in the same request, classify as "general" and set reasoning to "mixed_intent".
-CRITICAL RULE: If the user asks a knowledge/definition question (e.g., "what is", "what does", "explain", SOP/training/process/doc question), prefer "box" even if the entity name may also exist on a Monday board. Use "monday" only for explicit board/task/status/update operations.
+CRITICAL RULE: If the user explicitly references Monday.com (e.g., "from monday.com", "on monday board", "recent action items/updates"), classify as "monday" even when phrased as a question.
+CRITICAL RULE: If the user asks a knowledge/definition question (e.g., "what is", "what does", "explain", SOP/training/process/doc question), prefer "box" only when there is no explicit Monday operational request.
 
 Instructions:
 1. Analyze the message carefully - look for PRIMARY intent
@@ -100,6 +101,17 @@ Return ONLY the JSON classification.`;
 				return `${msg.role}: ${content.substring(0, 100)}`;
 			})
 			.join(' | ');
+	}
+
+	private hasMondayContext(chatHistory?: ChatMessage[]): boolean {
+		if (!chatHistory || chatHistory.length === 0) return false;
+		const recent = chatHistory.slice(-6);
+		const mondayContextPattern =
+			/\b(monday(\.com)?|action\s*items?|board|current\s+plate|backlog|prep|status\s+update|recent\s+updates?)\b/i;
+		return recent.some((msg) => {
+			const content = typeof msg.content === 'string' ? msg.content : '';
+			return mondayContextPattern.test(content);
+		});
 	}
 
 	/**
@@ -169,8 +181,9 @@ Return ONLY the JSON classification.`;
 	 * IMPORTANT: Check billing patterns FIRST when time entry indicators are present,
 	 * to avoid false positives from "meeting" appearing in task descriptions
 	 */
-	quickClassify(message: string): ClassificationResult | null {
+	quickClassify(message: string, chatHistory?: ChatMessage[]): ClassificationResult | null {
 		const lower = message.toLowerCase();
+		const hasMondayHistoryContext = this.hasMondayContext(chatHistory);
 
 		// High-confidence billing patterns - CHECK THESE FIRST
 		// This prevents "meeting" in task descriptions from triggering appointment classification
@@ -195,9 +208,38 @@ Return ONLY the JSON classification.`;
 
 		const schedulingIndicators = /\b(availability|available|free|schedule|booking|book|calendar)\b/;
 		const hasSchedulingIndicators = schedulingIndicators.test(lower);
-		const hasMondayOperationalIntent = /\b(monday(\.com)?|board|item|task|status|update|assign|backlog|current\s+plate|prep|column|group)\b/i.test(lower);
+		const hasMondayOperationalIntent = /\b(monday(\.com)?|board|item|task|status|update|assign|backlog|current\s+plate|prep|column|group|action\s*items?)\b/i.test(lower);
+		const hasExplicitMondayMention = /\bfrom\s+monday(\.com)?|monday(\.com)?\b/i.test(lower);
+		const hasProjectOpsIntent = /\b(recent|latest|current|what(\s+'?s|\s+is)?\s+going\s+on|progress|updates?|status|action\s*items?)\b/i.test(lower);
+		const hasKnownMondayProjectEntity = /\b(open\s*asset|openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b/i.test(lower);
 		const hasKnowledgeIntent =
 			/\b(what\s+is|what\s+does|explain|define|how\s+does|how\s+to|sop|training|document|docs|knowledge\s*base|policy|procedure|runbook|playbook)\b/i.test(lower);
+
+		// Hard override: explicit Monday references should not fall into Box,
+		// especially for "what is going on / updates / action items" style asks.
+		if (
+			hasExplicitMondayMention &&
+			(hasMondayOperationalIntent || hasProjectOpsIntent || hasKnownMondayProjectEntity || hasKnowledgeIntent)
+		) {
+			return {
+				category: 'monday',
+				confidence: 0.97,
+				reasoning: 'Explicit Monday mention with project/updates intent',
+			};
+		}
+
+		// Follow-up override from DB-backed chat history context.
+		if (
+			hasMondayHistoryContext &&
+			(hasProjectOpsIntent || hasMondayOperationalIntent || hasKnownMondayProjectEntity) &&
+			!/\bbox(?:-agent)?\b|\bknowledge\s*base\b|\bsop\b|\bpolicy\b|\brunbook\b|\bplaybook\b/i.test(lower)
+		) {
+			return {
+				category: 'monday',
+				confidence: 0.9,
+				reasoning: 'History-aware Monday follow-up intent',
+			};
+		}
 
 		if (hasTimeEntryIndicators && hasSchedulingIndicators) {
 			return {
@@ -219,44 +261,16 @@ Return ONLY the JSON classification.`;
 			}
 		}
 
-		// Prefer Box for definition/SOP/doc questions when no explicit Monday operation is requested.
-		if (hasKnowledgeIntent && !hasMondayOperationalIntent) {
-			return {
-				category: 'box',
-				confidence: 0.93,
-				reasoning: 'Pattern match: knowledge/definition intent',
-			};
-		}
-
-		const boxPatterns = [
-			/\bbox(?:-agent)?\b/i,
-			/\bknowledge\s*base\b/i,
-			/\b(sop|standard\s+operating\s+procedure)\b/i,
-			/\b(policy|playbook|runbook|procedure|how\s+to)\b/i,
-			/\b(find|search|retrieve|look\s*up)\b.*\b(doc|docs|document|knowledge)\b/i,
-			/\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b.*\b(what\s+is|what\s+does|explain|training|sop|documentation|docs)\b/i,
-			/\b(what\s+is|what\s+does|explain)\b.*\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b/i,
-		];
-
-		for (const pattern of boxPatterns) {
-			if (pattern.test(lower)) {
-				return {
-					category: 'box',
-					confidence: 0.9,
-					reasoning: 'Pattern match: Box knowledge-base assistant intent',
-				};
-			}
-		}
-
-		// Monday intent patterns - place BEFORE appointment patterns
+		// Monday intent patterns - place BEFORE Box patterns so update/status requests
+		// stay with Monday even when phrased as questions.
 		const mondayPatterns = [
 			// Direct Monday references
 			/\b(monday\.com|monday\s+board|monday\s+item|monday\s+task|action\s*items?\s*board)\b/i,
 
 			// Project-centric asks when clearly operational, not definitional
 			/\b(parent\s+project|project\s+status|status\s+of\s+project)\b/i,
-			/\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b.*\b(board|task|item|status|update|monday)\b/i,
-			/\b(board|task|item|status|update|monday)\b.*\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b/i,
+			/\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b.*\b(board|task|item|status|update|monday|action\s*items?)\b/i,
+			/\b(board|task|item|status|update|monday|action\s*items?)\b.*\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b/i,
 
 			// Lane/group semantics used in your board
 			/\b(prep|backlog(?:\s*-\s*kitchen)?|current\s+plate|completed)\b.*\b(items?|tasks?|status|updates?)\b/i,
@@ -284,6 +298,35 @@ Return ONLY the JSON classification.`;
 					category: 'monday',
 					confidence: 0.92,
 					reasoning: 'Pattern match: Monday.com project/task management',
+				};
+			}
+		}
+
+		// Prefer Box for definition/SOP/doc questions only when Monday signals are absent.
+		if (hasKnowledgeIntent && !hasMondayOperationalIntent && !hasExplicitMondayMention && !hasMondayHistoryContext) {
+			return {
+				category: 'box',
+				confidence: 0.93,
+				reasoning: 'Pattern match: knowledge/definition intent',
+			};
+		}
+
+		const boxPatterns = [
+			/\bbox(?:-agent)?\b/i,
+			/\bknowledge\s*base\b/i,
+			/\b(sop|standard\s+operating\s+procedure)\b/i,
+			/\b(policy|playbook|runbook|procedure|how\s+to)\b/i,
+			/\b(find|search|retrieve|look\s*up)\b.*\b(doc|docs|document|knowledge)\b/i,
+			/\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b.*\b(what\s+is|what\s+does|explain|training|sop|documentation|docs)\b/i,
+			/\b(what\s+is|what\s+does|explain)\b.*\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b/i,
+		];
+
+		for (const pattern of boxPatterns) {
+			if (pattern.test(lower)) {
+				return {
+					category: 'box',
+					confidence: 0.9,
+					reasoning: 'Pattern match: Box knowledge-base assistant intent',
 				};
 			}
 		}

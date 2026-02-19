@@ -137,27 +137,27 @@ export class MoERouter {
 	 * Classify a message and return the result
 	 */
 	async classifyMessage(message: string, sessionId?: string): Promise<ClassificationResult> {
-		// First try quick pattern matching
-		const quickResult = this.classifier.quickClassify(message);
-		if (quickResult) {
-			console.log(`[MoE Router] Quick classification: ${quickResult.category} (${quickResult.confidence})`);
-			this.lastClassification = quickResult;
-			return quickResult;
-		}
-
-		// Load recent chat history for context (helps classify follow-up queries)
+		// Load recent DB chat history first so quick classification can use context.
 		let chatHistory: Array<{ role: string; content?: string | null | unknown }> = [];
 		if (sessionId) {
 			try {
 				const fullHistory = await getChatHistoryAsync(sessionId);
-				// Take last 4 messages for classification context
-				chatHistory = fullHistory.slice(-4).map(msg => ({
+				// Take last 6 messages for stronger follow-up intent detection
+				chatHistory = fullHistory.slice(-6).map(msg => ({
 					role: msg.role,
 					content: typeof msg.content === 'string' ? msg.content : '',
 				}));
 			} catch (e) {
 				console.warn('[MoE Router] Could not load chat history for classification:', e);
 			}
+		}
+
+		// First try quick pattern matching
+		const quickResult = this.classifier.quickClassify(message, chatHistory as any);
+		if (quickResult) {
+			console.log(`[MoE Router] Quick classification: ${quickResult.category} (${quickResult.confidence})`);
+			this.lastClassification = quickResult;
+			return quickResult;
 		}
 
 		// Fall back to LLM classification with chat history context
