@@ -8,6 +8,7 @@
 	import BookingCard from './BookingCard.svelte';
 	import TimeEntryCard from './TimeEntryCard.svelte';
 	import MondayReportCard from './MondayReportCard.svelte';
+	import BoxKnowledgeCard from './BoxKnowledgeCard.svelte';
 
 	let {
 		message,
@@ -43,13 +44,38 @@
 		return mondaySignals.test(headingText) || mondaySignals.test(text.slice(0, 300));
 	}
 
+	/**
+	 * Detect Box knowledge-base responses. Primary trigger is an explicit Sources
+	 * section, with a fallback signal for citation-heavy document answers.
+	 */
+	function isBoxKnowledgeResponse(text: string, hasToolResult: boolean): boolean {
+		if (!text || hasToolResult) return false;
+
+		const hasSourcesHeading = /^#{1,4}\s+sources\b/im.test(text) || /^sources\s*:/im.test(text);
+		if (hasSourcesHeading) return true;
+
+		const hasDocSignals = /\b(box|knowledge\s*base|sop|policy|procedure|runbook|playbook|document)\b/i.test(text);
+		const hasCitations = /\[[^\]]+\]\(https?:\/\/[^\s)]+\)/i.test(text) || /\bhttps?:\/\/[^\s)]+/i.test(text);
+		return hasDocSignals && hasCitations;
+	}
+
 	let hasCard = $derived(!!message.toolResult);
 	let hasSuggestions = $derived(!!message.suggestions && message.suggestions.length > 0);
 	let entranceDelay = $derived.by(() => Math.min(index * 36, 220));
 	let showMondayCard = $derived(message.role === 'assistant' && isMondayReport(message.content, hasCard));
+	let showBoxCard = $derived(
+		message.role === 'assistant' &&
+			!showMondayCard &&
+			isBoxKnowledgeResponse(message.content, hasCard)
+	);
 
 	let collapsed = $state(false);
-	let contentTooLong = $derived(message.role === 'assistant' && !showMondayCard && message.content.length > 800);
+	let contentTooLong = $derived(
+		message.role === 'assistant' &&
+			!showMondayCard &&
+			!showBoxCard &&
+			message.content.length > 800
+	);
 	let displayContent = $derived.by(() => {
 		if (!contentTooLong || !collapsed) return message.content;
 		const cut = message.content.slice(0, 600);
@@ -102,8 +128,13 @@
 			<MondayReportCard content={message.content} />
 		{/if}
 
+		<!-- Box knowledge card with source citations -->
+		{#if showBoxCard}
+			<BoxKnowledgeCard content={message.content} />
+		{/if}
+
 		<!-- Text content bubble -->
-		{#if message.content.trim() && !showMondayCard}
+		{#if message.content.trim() && !showMondayCard && !showBoxCard}
 			<div
 				class="rounded-2xl px-4 py-3 {
 					message.role === 'user'

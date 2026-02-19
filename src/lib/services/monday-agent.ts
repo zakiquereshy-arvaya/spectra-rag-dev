@@ -12,6 +12,7 @@ export interface MondayAgentRequest {
 }
 
 export interface McpApprovalRequestData {
+	expert?: 'monday';
 	conversationId: string;
 	responseId: string;
 	approvalRequestId: string;
@@ -287,6 +288,7 @@ export class MondayAgentExpert {
 				} catch { /* keep empty */ }
 
 				const approvalData: McpApprovalRequestData = {
+					expert: 'monday',
 					conversationId: conversation.id,
 					responseId: response.id,
 					approvalRequestId: req.id,
@@ -357,6 +359,7 @@ export class MondayAgentExpert {
 					} catch { /* keep empty */ }
 
 					const approvalData: McpApprovalRequestData = {
+						expert: 'monday',
 						conversationId: decision.conversationId,
 						responseId: response.id,
 						approvalRequestId: req.id,

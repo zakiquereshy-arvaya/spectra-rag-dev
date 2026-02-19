@@ -6,6 +6,7 @@ import { MCPServer } from './mcp-server';
 import { BillingMCPServer } from './billing-mcp-server';
 import { UnifiedMCPServer } from './unified-mcp-server';
 import { MondayAgentExpert, type McpApprovalDecision } from './monday-agent';
+import { BoxAgentExpert } from './box-agent';
 import { MicrosoftGraphAuth } from './microsoft-graph-auth';
 import { getChatHistoryAsync } from './chat-history-store';
 import type { GenericChatMessage } from '$lib/utils/tokens';
@@ -21,7 +22,7 @@ export interface MoERequest {
 export interface MoEResponse {
 	content: string;
 	classification: ClassificationResult;
-	expert: 'appointments' | 'billing' | 'monday' | 'unified';
+	expert: 'appointments' | 'billing' | 'monday' | 'box' | 'unified';
 }
 
 export interface MoERouterConfig {
@@ -33,6 +34,7 @@ export interface MoERouterConfig {
 	webhookUrl?: string;
 	azureAgentEndpoint?: string;
 	azureAgentId?: string;
+	azureBoxAgentId?: string;
 }
 
 export class MoERouter {
@@ -41,6 +43,7 @@ export class MoERouter {
 	private billingExpert: BillingMCPServer | null = null;
 	private unifiedExpert: UnifiedMCPServer | null = null;
 	private mondayExpert: MondayAgentExpert | null = null;
+	private boxExpert: BoxAgentExpert | null = null;
 	private config: MoERouterConfig;
 	private lastClassification: ClassificationResult | null = null;
 
@@ -112,6 +115,17 @@ export class MoERouter {
 		return this.mondayExpert;
 	}
 
+	private getBoxExpert(): BoxAgentExpert {
+		if (!this.boxExpert) {
+			const { azureAgentEndpoint, azureBoxAgentId } = this.config;
+			if (!azureAgentEndpoint || !azureBoxAgentId) {
+				throw new Error('Azure agent endpoint and Box agent ID must be configured for the Box expert');
+			}
+			this.boxExpert = new BoxAgentExpert(azureAgentEndpoint, azureBoxAgentId);
+		}
+		return this.boxExpert;
+	}
+
 	/**
 	 * Get the last classification result
 	 */
@@ -156,9 +170,12 @@ export class MoERouter {
 	/**
 	 * Determine which expert to use based on classification
 	 */
-	private determineExpert(classification: ClassificationResult): 'appointments' | 'billing' | 'monday' | 'unified' {
+	private determineExpert(classification: ClassificationResult): 'appointments' | 'billing' | 'monday' | 'box' | 'unified' {
 		if (classification.category === 'monday') {
 			return 'monday';
+		}
+		if (classification.category === 'box') {
+			return 'box';
 		}
 		if (classification.category === 'appointments') {
 			return 'appointments';
@@ -245,6 +262,20 @@ export class MoERouter {
 					break;
 				}
 
+				case 'box': {
+					yield `[CLASSIFICATION:${JSON.stringify({ expert: 'box', category: 'box', confidence: classification.confidence })}]\n`;
+					const expert = this.getBoxExpert();
+					for await (const chunk of expert.handleRequestStream({
+						message,
+						sessionId,
+						userEmail: this.config.loggedInUser?.email,
+						userName: this.config.loggedInUser?.name,
+					})) {
+						yield chunk;
+					}
+					break;
+				}
+
 				case 'unified':
 				default: {
 					const expert = this.getUnifiedExpert();
@@ -264,7 +295,16 @@ export class MoERouter {
 	 * Handle an MCP tool approval decision for the Monday expert.
 	 * Returns an async generator that yields the continuation (text or another approval marker).
 	 */
-	async *handleMondayApproval(decision: McpApprovalDecision): AsyncGenerator<string> {
+	async *handleAgentApproval(expertType: 'monday' | 'box', decision: McpApprovalDecision): AsyncGenerator<string> {
+		if (expertType === 'box') {
+			const expert = this.getBoxExpert();
+			yield `[CLASSIFICATION:${JSON.stringify({ expert: 'box', category: 'box', confidence: 1 })}]\n`;
+			for await (const chunk of expert.handleApprovalStream(decision)) {
+				yield chunk;
+			}
+			return;
+		}
+
 		const expert = this.getMondayExpert();
 		yield `[CLASSIFICATION:${JSON.stringify({ expert: 'monday', category: 'monday', confidence: 1 })}]\n`;
 		for await (const chunk of expert.handleApprovalStream(decision)) {
@@ -281,6 +321,9 @@ export class MoERouter {
 		this.unifiedExpert?.clearHistory();
 		if (this.mondayExpert) {
 			this.mondayExpert.clearThread(this.config.sessionId);
+		}
+		if (this.boxExpert) {
+			this.boxExpert.clearThread(this.config.sessionId);
 		}
 	}
 }

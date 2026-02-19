@@ -22,7 +22,7 @@
 	let showPatchNotes = $state(false);
 
 	// Current mode indicator from classification
-	let currentMode = $state<'calendar' | 'billing' | 'assistant' | 'monday'>('assistant');
+	let currentMode = $state<'calendar' | 'billing' | 'assistant' | 'monday' | 'box'>('assistant');
 	let currentConfidence = $state<number>(0);
 
 	// Time entry form state
@@ -37,6 +37,7 @@
 
 	// MCP tool approval state
 	interface McpApprovalData {
+		expert?: 'monday' | 'box';
 		conversationId: string;
 		responseId: string;
 		approvalRequestId: string;
@@ -126,6 +127,7 @@
 		{ command: '/monday', label: 'Monday Updates', description: 'View action items from Monday.com', action: 'monday_updates' },
 		{ command: '/tasks', label: 'My Tasks', description: 'Show my assigned action items', action: 'monday_tasks' },
 		{ command: '/boards', label: 'Monday Boards', description: 'List boards and recent updates', action: 'monday_boards' },
+		{ command: '/box', label: 'Box Knowledge', description: 'Ask the Box knowledge agent', action: 'box_knowledge' },
 	];
 
 	let filteredSlashCommands = $derived.by(() =>
@@ -173,6 +175,15 @@
 				'Added comprehensive prose styles for headings, lists, tables, blockquotes, links, and details blocks.',
 				'Applied markdown rendering to streaming responses for consistent in-progress output formatting.',
 				'Added supporting dependencies for Azure agent integration and markdown sanitization.'
+			]
+		},
+		{
+			title: 'v1.2 Add-on: Box Expert',
+			items: [
+				'Added a new Box expert path in the MoE router with dedicated Box agent initialization.',
+				'Added a new box intent category with knowledge/SOP-first classification heuristics.',
+				'Generalized MCP approval continuation to route by expert (Monday or Box).',
+				'Added Box quick action, slash command, and mode badge styling in the chat UI.'
 			]
 		}
 	];
@@ -393,7 +404,9 @@
 										currentConfidence = classification.confidence;
 										currentMode = classification.expert === 'appointments' ? 'calendar'
 											: classification.expert === 'billing' ? 'billing'
-											: classification.expert === 'monday' ? 'monday' : 'assistant';
+											: classification.expert === 'monday' ? 'monday'
+											: classification.expert === 'box' ? 'box'
+											: 'assistant';
 									} catch {}
 									chunk = chunk.replace(/\[CLASSIFICATION:.+?\]\n?/, '');
 								}
@@ -537,7 +550,11 @@
 							try {
 								const cls = JSON.parse(classificationMatch[1]);
 								currentConfidence = cls.confidence;
-								currentMode = cls.expert === 'monday' ? 'monday' : 'assistant';
+								currentMode = cls.expert === 'monday'
+									? 'monday'
+									: cls.expert === 'box'
+										? 'box'
+										: 'assistant';
 							} catch {}
 							chunk = chunk.replace(/\[CLASSIFICATION:.+?\]\n?/, '');
 						}
@@ -591,6 +608,7 @@
 					approvalRequestId: approvalData.approvalRequestId,
 					approve,
 					reason: approve ? 'User approved' : 'User denied',
+					expert: approvalData.expert || 'monday',
 				}),
 			});
 
@@ -826,6 +844,9 @@
 			case 'monday_boards':
 				sendMessage("List the Monday.com boards and their recent updates");
 				break;
+			case 'box_knowledge':
+				sendMessage('Give me full instructions for EOD Reporting');
+				break;
 			default:
 				if (action.length > 15) {
 					if (action.endsWith(' ')) {
@@ -852,7 +873,7 @@
 		handleQuickAction(action);
 	}
 
-	function getModeConfig(mode: 'calendar' | 'billing' | 'assistant' | 'monday') {
+	function getModeConfig(mode: 'calendar' | 'billing' | 'assistant' | 'monday' | 'box') {
 		switch (mode) {
 			case 'calendar':
 				return {
@@ -871,6 +892,12 @@
 					label: 'Monday.com',
 					icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2',
 					color: 'text-red-400 bg-red-500/10 border-red-500/20'
+				};
+			case 'box':
+				return {
+					label: 'Box',
+					icon: 'M3 7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z',
+					color: 'text-[#0061FE] bg-[#0061FE]/12 border-[#0061FE]/30'
 				};
 			default:
 				return {

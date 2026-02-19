@@ -2,6 +2,7 @@ import type { RequestHandler } from './$types';
 import { MoERouter } from '$lib/services/moe-router';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
+import { env } from '$env/dynamic/private';
 import {
 	OPENAI_API_KEY,
 	AUTH_MICROSOFT_ENTRA_ID_ID,
@@ -38,7 +39,8 @@ export const POST: RequestHandler = async (event) => {
 
 	try {
 		const body = await event.request.json();
-		const { sessionId, conversationId, responseId, approvalRequestId, approve, reason } = body;
+		const { sessionId, conversationId, responseId, approvalRequestId, approve, reason, expert } = body;
+		const targetExpert: 'monday' | 'box' = expert === 'box' ? 'box' : 'monday';
 
 		if (!conversationId || !responseId || !approvalRequestId || typeof approve !== 'boolean') {
 			return new Response(
@@ -63,13 +65,14 @@ export const POST: RequestHandler = async (event) => {
 			webhookUrl: BILLI_DEV_WEBHOOK_URL,
 			azureAgentEndpoint: AZURE_EXISTING_AIPROJECT_ENDPOINT,
 			azureAgentId: AZURE_EXISTING_AGENT_ID,
+			azureBoxAgentId: env.AZURE_BOX_AGENT_ID,
 		});
 
 		const stream = new ReadableStream({
 			async start(controller) {
 				const encoder = new TextEncoder();
 				try {
-					for await (const chunk of router.handleMondayApproval({
+					for await (const chunk of router.handleAgentApproval(targetExpert, {
 						conversationId,
 						responseId,
 						approvalRequestId,

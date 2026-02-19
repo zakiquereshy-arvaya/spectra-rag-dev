@@ -103,12 +103,19 @@
 			action: 'monday_updates',
 			description: 'View action items & boards',
 		},
+		{
+			label: 'Box Knowledge',
+			icon: 'M3 7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z',
+			color: 'box',
+			action: 'box_knowledge',
+			description: 'Give me full instructions for EOD Reporting',
+		},
 	];
 
 	const mondayExamples = [
 		{ text: 'Show my action items', emoji: '📋' },
-		{ text: 'What\'s on the AI LLM board?', emoji: '🤖' },
-		{ text: 'Update status on my tasks', emoji: '✏️' },
+		{ text: 'What Is going on with the AI POWERED LLM', emoji: '🤖' },
+		{ text: 'Tell me what Open Asset is', emoji: '✏️' },
 		{ text: 'Show recent updates from Monday', emoji: '🔄' },
 	];
 
@@ -124,6 +131,8 @@
 				return { bg: 'hover:bg-amber-500/10', border: 'border-amber-500/15 hover:border-amber-500/30', text: 'text-amber-400', iconBg: 'bg-amber-500/10' };
 			case 'red':
 				return { bg: 'hover:bg-red-500/10', border: 'border-red-500/15 hover:border-red-500/30', text: 'text-red-400', iconBg: 'bg-red-500/10' };
+			case 'box':
+				return { bg: 'hover:bg-[#0061FE]/10', border: 'border-[#0061FE]/20 hover:border-[#0061FE]/40', text: 'text-[#0061FE]', iconBg: 'bg-[#0061FE]/10' };
 			default:
 				return { bg: 'hover:bg-white/5', border: 'border-white/10', text: 'text-white', iconBg: 'bg-white/5' };
 		}

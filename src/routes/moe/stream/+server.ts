@@ -4,6 +4,7 @@ import { MoERouter } from '$lib/services/moe-router';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
 import { logEvent } from '$lib/services/ops-logger';
+import { env } from '$env/dynamic/private';
 import {
 	OPENAI_API_KEY,
 	AUTH_MICROSOFT_ENTRA_ID_ID,
@@ -78,6 +79,7 @@ export const POST: RequestHandler = async (event) => {
 			webhookUrl: BILLI_DEV_WEBHOOK_URL,
 			azureAgentEndpoint: AZURE_EXISTING_AIPROJECT_ENDPOINT,
 			azureAgentId: AZURE_EXISTING_AGENT_ID,
+			azureBoxAgentId: env.AZURE_BOX_AGENT_ID,
 		});
 
 		// Create streaming response

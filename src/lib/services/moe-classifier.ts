@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import type { ChatMessage } from './openai-service';
 
 export interface ClassificationResult {
-	category: 'appointments' | 'billing' | 'general' | 'monday';
+	category: 'appointments' | 'billing' | 'general' | 'monday' | 'box';
 	confidence: number; // 0.0 to 1.0
 	reasoning?: string;
 }
@@ -29,16 +29,18 @@ export class MoEClassifier {
 		message: string,
 		chatHistory?: ChatMessage[]
 	): Promise<ClassificationResult> {
-		const systemPrompt = `You are an intent classifier for Arvaya AI & Automations. Your job is to categorize user messages into one of four categories.
+		const systemPrompt = `You are an intent classifier for Arvaya AI & Automations. Your job is to categorize user messages into one of five categories.
 
 Categories:
 - "appointments": Calendar, meetings, scheduling, availability checks, booking rooms, finding free time slots, Microsoft Calendar operations. IMPORTANT: Only classify as "appointments" if the user wants to SCHEDULE or BOOK a meeting. If "meeting" appears in a task description for time logging, it's "billing".
 - "billing": Time entries, logging hours, work tracking, QuickBooks, invoicing, customers/clients for billing, recording tasks completed. This includes messages like "log X hours for customer, tasks: did Y before meeting" - the word "meeting" here is part of the task description, not a request to book a meeting.
 - "monday": Monday.com board management, task creation, status updates, item assignment, column updates, sprint tracking, project management inside Monday.com.
+- "box": Box/knowledge-agent requests, SOP/policy/process questions, knowledge base retrieval, document-grounded Q&A handled by box-agent.
 - "general": Greetings, questions about capabilities, unclear intent, mixed requests, or anything that doesn't clearly fit appointments or billing
 
 CRITICAL RULE: If a message contains time entry indicators (customer, hours, tasks, description, "log", "record", "submit") AND mentions "meeting", prioritize "billing" unless the message explicitly asks to schedule/book a meeting.
 CRITICAL RULE: If a message clearly asks for BOTH calendar actions and time entry logging in the same request, classify as "general" and set reasoning to "mixed_intent".
+CRITICAL RULE: If the user asks a knowledge/definition question (e.g., "what is", "what does", "explain", SOP/training/process/doc question), prefer "box" even if the entity name may also exist on a Monday board. Use "monday" only for explicit board/task/status/update operations.
 
 Instructions:
 1. Analyze the message carefully - look for PRIMARY intent
@@ -52,7 +54,7 @@ Instructions:
 
 Return ONLY valid JSON in this format:
 {
-  "category": "appointments" | "billing" | "general" | "monday",
+  "category": "appointments" | "billing" | "general" | "monday" | "box",
   "confidence": 0.0-1.0,
   "reasoning": "brief explanation"
 }`;
@@ -136,9 +138,9 @@ Return ONLY the JSON classification.`;
 			const parsed = JSON.parse(text);
 
 			// Validate category
-			const validCategories = ['appointments', 'billing', 'general', 'monday'];
+			const validCategories = ['appointments', 'billing', 'general', 'monday', 'box'];
 			const category = validCategories.includes(parsed.category)
-				? (parsed.category as 'appointments' | 'billing' | 'general' | 'monday')
+				? (parsed.category as 'appointments' | 'billing' | 'general' | 'monday' | 'box')
 				: 'general';
 
 			// Validate confidence (ensure it's between 0 and 1)
@@ -193,6 +195,9 @@ Return ONLY the JSON classification.`;
 
 		const schedulingIndicators = /\b(availability|available|free|schedule|booking|book|calendar)\b/;
 		const hasSchedulingIndicators = schedulingIndicators.test(lower);
+		const hasMondayOperationalIntent = /\b(monday(\.com)?|board|item|task|status|update|assign|backlog|current\s+plate|prep|column|group)\b/i.test(lower);
+		const hasKnowledgeIntent =
+			/\b(what\s+is|what\s+does|explain|define|how\s+does|how\s+to|sop|training|document|docs|knowledge\s*base|policy|procedure|runbook|playbook)\b/i.test(lower);
 
 		if (hasTimeEntryIndicators && hasSchedulingIndicators) {
 			return {
@@ -214,13 +219,44 @@ Return ONLY the JSON classification.`;
 			}
 		}
 
+		// Prefer Box for definition/SOP/doc questions when no explicit Monday operation is requested.
+		if (hasKnowledgeIntent && !hasMondayOperationalIntent) {
+			return {
+				category: 'box',
+				confidence: 0.93,
+				reasoning: 'Pattern match: knowledge/definition intent',
+			};
+		}
+
+		const boxPatterns = [
+			/\bbox(?:-agent)?\b/i,
+			/\bknowledge\s*base\b/i,
+			/\b(sop|standard\s+operating\s+procedure)\b/i,
+			/\b(policy|playbook|runbook|procedure|how\s+to)\b/i,
+			/\b(find|search|retrieve|look\s*up)\b.*\b(doc|docs|document|knowledge)\b/i,
+			/\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b.*\b(what\s+is|what\s+does|explain|training|sop|documentation|docs)\b/i,
+			/\b(what\s+is|what\s+does|explain)\b.*\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b/i,
+		];
+
+		for (const pattern of boxPatterns) {
+			if (pattern.test(lower)) {
+				return {
+					category: 'box',
+					confidence: 0.9,
+					reasoning: 'Pattern match: Box knowledge-base assistant intent',
+				};
+			}
+		}
+
 		// Monday intent patterns - place BEFORE appointment patterns
 		const mondayPatterns = [
 			// Direct Monday references
 			/\b(monday\.com|monday\s+board|monday\s+item|monday\s+task|action\s*items?\s*board)\b/i,
 
-			// Project-centric asks (matches your Parent Project usage)
-			/\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?|parent\s+project|project\s+status|status\s+of\s+project)\b/i,
+			// Project-centric asks when clearly operational, not definitional
+			/\b(parent\s+project|project\s+status|status\s+of\s+project)\b/i,
+			/\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b.*\b(board|task|item|status|update|monday)\b/i,
+			/\b(board|task|item|status|update|monday)\b.*\b(openasset|ai\s*powered\s*llm(?:\s*mvp)?)\b/i,
 
 			// Lane/group semantics used in your board
 			/\b(prep|backlog(?:\s*-\s*kitchen)?|current\s+plate|completed)\b.*\b(items?|tasks?|status|updates?)\b/i,

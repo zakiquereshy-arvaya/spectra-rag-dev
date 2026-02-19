@@ -42,6 +42,7 @@
 			{ value: 'VP/Zistemo', label: 'VP/Zistemo' },
 			{ value: 'AI POWERED LLM', label: 'AI POWERED LLM' },
 			{ value: 'General/Meetings', label: 'General/Meetings (Provide description)' },
+			{ value: 'other', label: 'Other (specify below)' },
 		],
 	};
 
@@ -160,7 +161,7 @@
 			</div>
 		{/if}
 
-		<!-- Custom Project Input (for Arvaya "Other" option) -->
+		<!-- Custom Project Input (for any "Other" option) -->
 		{#if selectedProject === 'other'}
 			<div class="animate-fade-in">
 				<label for="customProject" class="block text-sm font-medium text-slate-300 mb-2">
