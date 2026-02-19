@@ -1,6 +1,6 @@
 import {SvelteKitAuth} from '@auth/sveltekit';
 import MicrosoftEntraID from '@auth/core/providers/microsoft-entra-id';
-import { AUTH_MICROSOFT_ENTRA_ID_ID, AUTH_MICROSOFT_ENTRA_ID_SECRET, AUTH_MICROSOFT_ENTRA_ID_ISSUER, AUTH_MICROSOFT_ENTRA_ID_TENANT_ID } from '$env/static/private';
+import { AUTH_MICROSOFT_ENTRA_ID_ID, AUTH_MICROSOFT_ENTRA_ID_SECRET, AUTH_MICROSOFT_ENTRA_ID_ISSUER } from '$env/static/private';
 
 export const {handle} = SvelteKitAuth({
     providers: [
@@ -8,7 +8,6 @@ export const {handle} = SvelteKitAuth({
             clientId: AUTH_MICROSOFT_ENTRA_ID_ID,
             clientSecret: AUTH_MICROSOFT_ENTRA_ID_SECRET,
             issuer: AUTH_MICROSOFT_ENTRA_ID_ISSUER,
-            tenantId: AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
             authorization: {
                 params: {
                     scope: 'openid profile email offline_access Calendars.ReadWrite User.Read.All',
@@ -30,6 +29,18 @@ export const {handle} = SvelteKitAuth({
             // Send properties to the client
             (session as any).accessToken = token.accessToken;
             return session;
+        },
+    },
+    debug: true,
+    logger: {
+        error(code, metadata) {
+            console.error('[AUTH][ERROR]', code, metadata);
+        },
+        warn(code) {
+            console.warn('[AUTH][WARN]', code);
+        },
+        debug(code, metadata) {
+            console.log('[AUTH][DEBUG]', code, metadata);
         },
     },
     trustHost: true,
