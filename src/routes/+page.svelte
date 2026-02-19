@@ -66,8 +66,7 @@
 							Internal tools and AI assistants for the Arvaya team
 						</p>
 						<button
-							onclick={() =>
-								signIn('microsoft-entra-id', { redirectTo: '/' }, { prompt: 'select_account' })}
+							onclick={() => signIn('microsoft-entra-id')}
 							class="inline-flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-semibold text-lg
 							       hover:from-amber-400 hover:to-orange-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-surface
 							       transition-all duration-200 shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/30 btn-press btn-glow animate-fade-in-up"
