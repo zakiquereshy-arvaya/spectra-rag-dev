@@ -553,6 +553,23 @@ export class MCPServer {
 						attendees,
 						body,
 					} = args;
+					const normalizeAttendees = (value: unknown): string[] => {
+						const raw = Array.isArray(value)
+							? value
+							: typeof value === 'string'
+								? value.split(/[;,]/)
+								: [];
+						const seen = new Set<string>();
+						const deduped: string[] = [];
+						for (const item of raw) {
+							if (typeof item !== 'string') continue;
+							const email = item.trim().toLowerCase();
+							if (!email || !email.includes('@') || seen.has(email)) continue;
+							seen.add(email);
+							deduped.push(email);
+						}
+						return deduped;
+					};
 
 					if (!subject || !subject.trim()) {
 						throw new Error(
@@ -662,6 +679,7 @@ export class MCPServer {
 
 					const startISO = startDateTimeStr;
 					const endISO = endDateTimeStr;
+					const normalizedAttendees = normalizeAttendees(attendees);
 
 					const event = await this.graphService.createEventForUser(user_email, {
 						subject,
@@ -670,7 +688,7 @@ export class MCPServer {
 						timeZone: 'Eastern Standard Time',
 						senderName: validatedSenderName,
 						senderEmail: validatedSenderEmail,
-						attendees: attendees || [],
+						attendees: normalizedAttendees,
 						body: body || '',
 						isOnlineMeeting: true,
 					});
@@ -713,7 +731,7 @@ export class MCPServer {
 							duration_minutes: durationMinutes,
 							teams_link: teamsLink,
 							has_teams_link: teamsLink !== null,
-							attendee_emails: attendees || [],
+							attendee_emails: normalizedAttendees,
 							sender_name: validatedSenderName,
 							sender_email: validatedSenderEmail,
 						},

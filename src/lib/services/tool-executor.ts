@@ -338,6 +338,23 @@ export class ToolExecutor {
 
 	private async executeBookMeeting(args: Record<string, any>): Promise<any> {
 		let { user_email, subject, start_datetime, end_datetime, attendees, body } = args;
+		const normalizeAttendees = (value: unknown): string[] => {
+			const raw = Array.isArray(value)
+				? value
+				: typeof value === 'string'
+					? value.split(/[;,]/)
+					: [];
+			const seen = new Set<string>();
+			const deduped: string[] = [];
+			for (const item of raw) {
+				if (typeof item !== 'string') continue;
+				const email = item.trim().toLowerCase();
+				if (!email || !email.includes('@') || seen.has(email)) continue;
+				seen.add(email);
+				deduped.push(email);
+			}
+			return deduped;
+		};
 
 		if (!subject?.trim()) {
 			throw new Error('Meeting subject is REQUIRED. Please ask the user for the meeting subject/title.');
@@ -395,6 +412,7 @@ export class ToolExecutor {
 
 		const startISO = parseTimeInEastern(start_datetime);
 		const endISO = parseTimeInEastern(end_datetime);
+		const normalizedAttendees = normalizeAttendees(attendees);
 
 		const event = await this.graphService.createEventForUser(user_email, {
 			subject,
@@ -403,7 +421,7 @@ export class ToolExecutor {
 			timeZone: 'Eastern Standard Time',
 			senderName: senderUser.name,
 			senderEmail: senderUser.email,
-			attendees: attendees || [],
+			attendees: normalizedAttendees,
 			body: body || '',
 			isOnlineMeeting: true,
 		});

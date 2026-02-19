@@ -376,28 +376,37 @@ export class MicrosoftGraphService {
 			};
 		}
 
-		// Build attendees list - include recipient and any additional attendees
-		// Sender is automatically the organizer since event is created on their calendar
-		const attendeesList: any[] = [];
-		
-		// Add recipient as attendee
-		attendeesList.push({
-			emailAddress: { address: recipientEmail },
-			type: 'required',
-		});
+		// Build attendees list exactly once with normalized, deduped emails.
+		// Sender is organizer and should never appear as an attendee.
+		const recipient = recipientEmail.trim().toLowerCase();
+		const sender = event.senderEmail?.trim().toLowerCase() || '';
+		const seen = new Set<string>();
+		const normalizedAttendees: string[] = [];
 
-		// Add any additional attendees (avoid duplicates)
-		if (event.attendees && event.attendees.length > 0) {
-			for (const email of event.attendees) {
-				if (email.toLowerCase() !== recipientEmail.toLowerCase() && 
-				    email.toLowerCase() !== event.senderEmail?.toLowerCase()) {
-					attendeesList.push({
-						emailAddress: { address: email },
-						type: 'required',
-					});
-				}
-			}
+		const addAttendee = (value: unknown): void => {
+			if (typeof value !== 'string') return;
+			const email = value.trim().toLowerCase();
+			if (!email || !email.includes('@')) return;
+			if (email === sender) return;
+			if (seen.has(email)) return;
+			seen.add(email);
+			normalizedAttendees.push(email);
+		};
+
+		// Ensure the primary recipient is always included first.
+		addAttendee(recipient);
+
+		// Accept both array and comma/semicolon-separated attendee strings.
+		if (Array.isArray(event.attendees)) {
+			for (const email of event.attendees) addAttendee(email);
+		} else if (typeof event.attendees === 'string') {
+			for (const email of event.attendees.split(/[;,]/)) addAttendee(email);
 		}
+
+		const attendeesList = normalizedAttendees.map((email) => ({
+			emailAddress: { address: email },
+			type: 'required',
+		}));
 
 		if (attendeesList.length > 0) {
 			graphEvent.attendees = attendeesList;
