@@ -7,6 +7,9 @@ import { createHash } from 'node:crypto';
 const clientId = AUTH_MICROSOFT_ENTRA_ID_ID.trim();
 const clientSecret = AUTH_MICROSOFT_ENTRA_ID_SECRET.trim();
 const issuer = AUTH_MICROSOFT_ENTRA_ID_ISSUER.trim();
+const CALLBACK_PATH = '/auth/callback/microsoft-entra-id';
+const CALLBACK_DEDUPE_TTL_MS = 60_000;
+const recentCallbackCodeHashes = new Map<string, number>();
 
 const { handle: authHandle } = SvelteKitAuth({
     providers: [
@@ -14,6 +17,7 @@ const { handle: authHandle } = SvelteKitAuth({
             clientId,
             clientSecret,
             issuer,
+            checks: ['pkce', 'state'],
             client: {
                 token_endpoint_auth_method: 'client_secret_post',
             },
@@ -41,7 +45,6 @@ const { handle: authHandle } = SvelteKitAuth({
     trustHost: true,
 });
 
-const CALLBACK_PATH = '/auth/callback/microsoft-entra-id';
 const isAuthDebugEnabled = env.AUTH_DEBUG?.trim() === 'true';
 
 function shortHash(value: string | null): string | null {
@@ -49,8 +52,42 @@ function shortHash(value: string | null): string | null {
     return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
+function pruneOldCallbackHashes(now: number): void {
+    for (const [hash, seenAt] of recentCallbackCodeHashes.entries()) {
+        if (now - seenAt > CALLBACK_DEDUPE_TTL_MS) {
+            recentCallbackCodeHashes.delete(hash);
+        }
+    }
+}
+
+function redirectToHome(origin: string): Response {
+    return new Response(null, {
+        status: 302,
+        headers: { location: `${origin}/` },
+    });
+}
+
 export const handle: import('@sveltejs/kit').Handle = async ({ event, resolve }) => {
     const isCallbackRequest = event.url.pathname === CALLBACK_PATH;
+    const code = event.url.searchParams.get('code');
+    const codeHash = shortHash(code);
+
+    if (isCallbackRequest && codeHash) {
+        const now = Date.now();
+        pruneOldCallbackHashes(now);
+
+        const hasSeenCodeRecently = recentCallbackCodeHashes.has(codeHash);
+        if (hasSeenCodeRecently) {
+            console.error('[AuthTrace] callback_dedupe', {
+                codeHash,
+                host: event.url.host,
+                protocol: event.url.protocol,
+            });
+            return redirectToHome(event.url.origin);
+        }
+
+        recentCallbackCodeHashes.set(codeHash, now);
+    }
 
     if (!isAuthDebugEnabled || !isCallbackRequest) {
         return authHandle({ event, resolve });
@@ -59,7 +96,6 @@ export const handle: import('@sveltejs/kit').Handle = async ({ event, resolve })
     const cookieHeader = event.request.headers.get('cookie') ?? '';
     const hasSecurePkceCookie = /(?:^|;\s*)__Secure-authjs\.pkce\.code_verifier=/.test(cookieHeader);
     const hasPlainPkceCookie = /(?:^|;\s*)authjs\.pkce\.code_verifier=/.test(cookieHeader);
-    const code = event.url.searchParams.get('code');
     const state = event.url.searchParams.get('state');
     const sessionState = event.url.searchParams.get('session_state');
     const traceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -70,7 +106,7 @@ export const handle: import('@sveltejs/kit').Handle = async ({ event, resolve })
         host: event.url.host,
         protocol: event.url.protocol,
         codePresent: Boolean(code),
-        codeHash: shortHash(code),
+        codeHash,
         statePresent: Boolean(state),
         stateHash: shortHash(state),
         sessionStatePresent: Boolean(sessionState),
