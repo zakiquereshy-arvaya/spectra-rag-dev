@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { BILLI_DEV_WEBHOOK_URL, COHERE_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { TimeEntryService } from '$lib/services/time-entry';
 
 export const POST: RequestHandler = async (event) => {
@@ -23,7 +23,7 @@ export const POST: RequestHandler = async (event) => {
 		const userEmail = session.user?.email || '';
 
 		// Initialize time entry service
-		const timeEntryService = new TimeEntryService(COHERE_API_KEY);
+		const timeEntryService = new TimeEntryService(env.COHERE_API_KEY);
 
 		// Process the time entry (AI extraction + DB lookups)
 		const result = await timeEntryService.processTimeEntry({

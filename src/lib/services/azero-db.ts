@@ -2,7 +2,7 @@
 // Contains employee and customer data with QuickBooks IDs
 
 import pg from 'pg';
-import { AZERO_DATABASE_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 
 export interface Employee {
 	id: number;
@@ -57,12 +57,12 @@ function isPlaceholderName(value: string): boolean {
  */
 export function getAZeroClient(): pg.Pool {
 	if (!pgPool) {
-		if (!AZERO_DATABASE_URL) {
+		if (!env.AZERO_DATABASE_URL) {
 			throw new Error('Missing AZERO_DATABASE_URL environment variable');
 		}
 
 		pgPool = new pg.Pool({
-			connectionString: AZERO_DATABASE_URL,
+			connectionString: env.AZERO_DATABASE_URL,
 			ssl: { rejectUnauthorized: false },
 			max: 10,
 			idleTimeoutMillis: 30000,

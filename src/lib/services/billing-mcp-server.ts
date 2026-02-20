@@ -14,7 +14,7 @@ import {
 import { getChatHistoryAsync, setChatHistoryAsync } from './chat-history-store';
 import { prepareChatHistory } from '$lib/utils/tokens';
 import { getTodayEastern, formatDateEastern } from '$lib/utils/datetime';
-import { BILLI_DEV_WEBHOOK_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 
 // Extended message type with timestamp for storage
 type StoredChatMessage = GenericChatMessage;
@@ -46,7 +46,7 @@ export class BillingMCPServer {
 		this.openaiService = new OpenAIService(openaiApiKey);
 		this.sessionId = sessionId;
 		this.loggedInUser = loggedInUser || null;
-		this.webhookUrl = webhookUrl || BILLI_DEV_WEBHOOK_URL;
+		this.webhookUrl = webhookUrl || env.BILLI_DEV_WEBHOOK_URL || '';
 	}
 
 	/**

@@ -1,7 +1,7 @@
 // Supabase client for server-side operations
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { PUBLIC_SUPABASE_URL } from '$env/static/public';
-import { SUPABASE_SERVICE_ROLE_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
+
 export interface ChatSession {
 	id: string;
 	messages: any[]; // ChatMessageV2[]
@@ -13,11 +13,13 @@ let supabaseClient: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient {
 	if (!supabaseClient) {
-		if (!PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+		const url = env.PUBLIC_SUPABASE_URL;
+		const key = env.SUPABASE_SERVICE_ROLE_KEY;
+		if (!url || !key) {
 			throw new Error('Missing Supabase environment variables');
 		}
 
-		supabaseClient = createClient(PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+		supabaseClient = createClient(url, key, {
 			auth: {
 				autoRefreshToken: false,
 				persistSession: false,

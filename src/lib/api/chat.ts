@@ -1,4 +1,4 @@
-import { PUBLIC_N8N_CHAT_WH_URL } from '$env/static/public';
+import { env } from '$env/dynamic/public';
 import { fetchWithRetry } from '$lib/utils/retry';
 
 export interface ToolResultData {
@@ -31,14 +31,15 @@ export async function sendMessage(
 	message: string,
 	options: SendMessageOptions = {}
 ): Promise<string> {
-	if (!PUBLIC_N8N_CHAT_WH_URL) {
+	const url = env.PUBLIC_N8N_CHAT_WH_URL;
+	if (!url) {
 		throw new Error('PUBLIC_N8N_CHAT_WH_URL is not set');
 	}
 
 	const { signal, timeoutMs = 60000 } = options;
 
 	const response = await fetchWithRetry(
-		PUBLIC_N8N_CHAT_WH_URL,
+		url,
 		{
 			method: 'POST',
 			headers: {

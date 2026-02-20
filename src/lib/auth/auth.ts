@@ -1,12 +1,11 @@
 import {SvelteKitAuth} from '@auth/sveltekit';
 import MicrosoftEntraID from '@auth/core/providers/microsoft-entra-id';
-import { AUTH_MICROSOFT_ENTRA_ID_ID, AUTH_MICROSOFT_ENTRA_ID_SECRET, AUTH_MICROSOFT_ENTRA_ID_ISSUER } from '$env/static/private';
 import { env } from '$env/dynamic/private';
 import { createHash } from 'node:crypto';
 
-const clientId = AUTH_MICROSOFT_ENTRA_ID_ID.trim();
-const clientSecret = AUTH_MICROSOFT_ENTRA_ID_SECRET.trim();
-const issuer = AUTH_MICROSOFT_ENTRA_ID_ISSUER.trim();
+const clientId = (env.AUTH_MICROSOFT_ENTRA_ID_ID ?? '').trim();
+const clientSecret = (env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? '').trim();
+const issuer = (env.AUTH_MICROSOFT_ENTRA_ID_ISSUER ?? '').trim();
 const CALLBACK_PATH = '/auth/callback/microsoft-entra-id';
 const CALLBACK_DEDUPE_TTL_MS = 60_000;
 const recentCallbackCodeHashes = new Map<string, number>();

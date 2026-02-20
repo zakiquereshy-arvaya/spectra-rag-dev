@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { isOpsAllowed } from '$lib/services/ops-access';
 import { queryAgentReports } from '$lib/services/ops-logger';
 import { DevOpsAgentService } from '$lib/services/devops-agent';
-import { OPENAI_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 
 /** GET: Fetch recent agent reports */
 export const GET: RequestHandler = async (event) => {
@@ -29,12 +29,12 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
-	if (!OPENAI_API_KEY) {
+	if (!env.OPENAI_API_KEY) {
 		return json({ error: 'OpenAI API key not configured' }, { status: 500 });
 	}
 
 	try {
-		const agent = new DevOpsAgentService(OPENAI_API_KEY);
+		const agent = new DevOpsAgentService(env.OPENAI_API_KEY);
 		const report = await agent.runAssessment(session.user?.email ?? 'unknown');
 		return json({ data: report });
 	} catch (error: any) {

@@ -3,13 +3,7 @@ import type { RequestHandler } from './$types';
 import { MCPServer } from '$lib/services/mcp-server';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
-import {
-	AUTH_MICROSOFT_ENTRA_ID_ID,
-	AUTH_MICROSOFT_ENTRA_ID_SECRET,
-	AUTH_MICROSOFT_ENTRA_ID_ISSUER,
-	AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
-	OPENAI_API_KEY
-} from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import type { MCPRequest } from '$lib/types/mcp';
 
 export const POST: RequestHandler = async (event) => {
@@ -20,7 +14,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	// Get OpenAI API key from private environment variable
-	const openaiApiKey = OPENAI_API_KEY;
+	const openaiApiKey = env.OPENAI_API_KEY;
 	if (!openaiApiKey) {
 		return json(
 			{ error: 'OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.' },
@@ -31,11 +25,11 @@ export const POST: RequestHandler = async (event) => {
 	// Get Microsoft Graph app-only auth credentials (client credentials flow)
 	// Extract tenant ID from issuer if not explicitly set
 	// Issuer format: https://login.microsoftonline.com/{tenantId}/v2.0
-	const issuer = AUTH_MICROSOFT_ENTRA_ID_ISSUER || '';
-	const tenantId = AUTH_MICROSOFT_ENTRA_ID_TENANT_ID || 
+	const issuer = env.AUTH_MICROSOFT_ENTRA_ID_ISSUER || '';
+	const tenantId = env.AUTH_MICROSOFT_ENTRA_ID_TENANT_ID || 
 		(issuer ? issuer.split('/')[3] : null);
-	const clientId = AUTH_MICROSOFT_ENTRA_ID_ID;
-	const clientSecret = AUTH_MICROSOFT_ENTRA_ID_SECRET;
+	const clientId = env.AUTH_MICROSOFT_ENTRA_ID_ID;
+	const clientSecret = env.AUTH_MICROSOFT_ENTRA_ID_SECRET;
 
 	if (!tenantId || !clientId || !clientSecret) {
 		console.error('Missing Microsoft Graph app-only auth config:', {

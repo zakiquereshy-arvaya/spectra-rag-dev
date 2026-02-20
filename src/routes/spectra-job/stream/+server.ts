@@ -1,5 +1,5 @@
 import type { RequestHandler } from './$types';
-import { COHERE_API_KEY, PINECONE_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { PineconeRAGService } from '$lib/services/pinecone';
 import { CohereClientV2 } from 'cohere-ai';
 import { getChatHistory, setChatHistory } from '$lib/services/chat-history-store';
@@ -33,11 +33,11 @@ export const POST: RequestHandler = async (event) => {
 		return new Response('Unauthorized', { status: 401 });
 	}
 
-	if (!COHERE_API_KEY) {
+	if (!env.COHERE_API_KEY) {
 		return new Response('Cohere API key not configured', { status: 500 });
 	}
 
-	if (!PINECONE_API_KEY) {
+	if (!env.PINECONE_API_KEY) {
 		return new Response('Pinecone API key not configured', { status: 500 });
 	}
 
@@ -62,8 +62,8 @@ export const POST: RequestHandler = async (event) => {
 		});
 
 		// Initialize services
-		const ragService = new PineconeRAGService(PINECONE_API_KEY, COHERE_API_KEY, 'taleo-doc');
-		const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+		const ragService = new PineconeRAGService(env.PINECONE_API_KEY, env.COHERE_API_KEY, 'taleo-doc');
+		const cohere = new CohereClientV2({ token: env.COHERE_API_KEY });
 
 		// Get RAG context from Pinecone
 		console.log('Querying Pinecone for:', message);

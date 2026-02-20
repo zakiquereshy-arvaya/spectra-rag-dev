@@ -3,16 +3,6 @@ import { MoERouter } from '$lib/services/moe-router';
 import { MicrosoftGraphAuth } from '$lib/services/microsoft-graph-auth';
 import { getAccessToken } from '$lib/utils/auth';
 import { env } from '$env/dynamic/private';
-import {
-	OPENAI_API_KEY,
-	AUTH_MICROSOFT_ENTRA_ID_ID,
-	AUTH_MICROSOFT_ENTRA_ID_SECRET,
-	AUTH_MICROSOFT_ENTRA_ID_ISSUER,
-	AUTH_MICROSOFT_ENTRA_ID_TENANT_ID,
-	BILLI_DEV_WEBHOOK_URL,
-	AZURE_EXISTING_AIPROJECT_ENDPOINT,
-	AZURE_EXISTING_AGENT_ID,
-} from '$env/static/private';
 
 export const POST: RequestHandler = async (event) => {
 	const session = await event.locals.auth();
@@ -20,15 +10,15 @@ export const POST: RequestHandler = async (event) => {
 		return new Response('Unauthorized', { status: 401 });
 	}
 
-	const openaiApiKey = OPENAI_API_KEY;
+	const openaiApiKey = env.OPENAI_API_KEY;
 	if (!openaiApiKey) {
 		return new Response('OpenAI API key not configured', { status: 500 });
 	}
 
-	const issuer = AUTH_MICROSOFT_ENTRA_ID_ISSUER || '';
-	const tenantId = AUTH_MICROSOFT_ENTRA_ID_TENANT_ID || (issuer ? issuer.split('/')[3] : null);
-	const clientId = AUTH_MICROSOFT_ENTRA_ID_ID;
-	const clientSecret = AUTH_MICROSOFT_ENTRA_ID_SECRET;
+	const issuer = env.AUTH_MICROSOFT_ENTRA_ID_ISSUER || '';
+	const tenantId = env.AUTH_MICROSOFT_ENTRA_ID_TENANT_ID || (issuer ? issuer.split('/')[3] : null);
+	const clientId = env.AUTH_MICROSOFT_ENTRA_ID_ID;
+	const clientSecret = env.AUTH_MICROSOFT_ENTRA_ID_SECRET;
 
 	let authService: MicrosoftGraphAuth | undefined;
 	if (tenantId && clientId && clientSecret) {
@@ -62,9 +52,9 @@ export const POST: RequestHandler = async (event) => {
 			authService,
 			accessToken: accessToken || undefined,
 			loggedInUser,
-			webhookUrl: BILLI_DEV_WEBHOOK_URL,
-			azureAgentEndpoint: AZURE_EXISTING_AIPROJECT_ENDPOINT,
-			azureAgentId: AZURE_EXISTING_AGENT_ID,
+			webhookUrl: env.BILLI_DEV_WEBHOOK_URL,
+			azureAgentEndpoint: env.AZURE_EXISTING_AIPROJECT_ENDPOINT,
+			azureAgentId: env.AZURE_EXISTING_AGENT_ID,
 			azureBoxAgentId: env.AZURE_BOX_AGENT_ID,
 		});
 

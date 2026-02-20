@@ -5,7 +5,7 @@ import { RAG_SYSTEM_PROMPT, RAG_VALIDATION_PROMPT } from '$lib/services/rag-prom
 import { RagRetrievalService } from '$lib/services/rag-retrieval';
 import { getRagConfig } from '$lib/services/rag-config';
 import { logEvent } from '$lib/services/ops-logger';
-import { COHERE_API_KEY, VECTOR_DATABASE_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 
 export const POST: RequestHandler = async (event) => {
 	const session = await event.locals.auth();
@@ -13,7 +13,7 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	if (!COHERE_API_KEY || !VECTOR_DATABASE_URL) {
+	if (!env.COHERE_API_KEY || !env.VECTOR_DATABASE_URL) {
 		return json({ error: 'Missing COHERE_API_KEY or VECTOR_DATABASE_URL' }, { status: 500 });
 	}
 
@@ -38,8 +38,8 @@ export const POST: RequestHandler = async (event) => {
 		});
 
 		const retrieval = new RagRetrievalService(
-			VECTOR_DATABASE_URL,
-			COHERE_API_KEY,
+			env.VECTOR_DATABASE_URL,
+			env.COHERE_API_KEY,
 			getRagConfig()
 		);
 		const { context, sources, chunks } = await retrieval.retrieve(question, filters || {}, session.user?.email ?? undefined);
@@ -51,7 +51,7 @@ export const POST: RequestHandler = async (event) => {
 			});
 		}
 
-		const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+		const cohere = new CohereClientV2({ token: env.COHERE_API_KEY });
 		const messages = [
 			{ role: 'system', content: RAG_SYSTEM_PROMPT },
 			{ role: 'system', content: `Context:\n${context}` },

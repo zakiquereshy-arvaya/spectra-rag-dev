@@ -2,7 +2,7 @@
 import type { RequestHandler } from './$types';
 import { dev } from '$app/environment';
 import OpenAI from 'openai';
-import { BILLI_DEV_WEBHOOK_URL, OPENAI_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { getEmployeeByName, getCustomerByName, getAllEmployees, type Employee } from '$lib/services/azero-db';
 import { getTodayEastern } from '$lib/utils/datetime';
 
@@ -59,7 +59,7 @@ async function resolveEmployeeForWebhook(userName: string, userEmail: string): P
 		if (byName) return byName;
 	}
 
-	if (!OPENAI_API_KEY) {
+	if (!env.OPENAI_API_KEY) {
 		return null;
 	}
 
@@ -69,7 +69,7 @@ async function resolveEmployeeForWebhook(userName: string, userEmail: string): P
 		.slice(0, 25)
 		.map((item) => item.employee);
 
-	const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+	const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 	const response = await openai.chat.completions.create({
 		model: 'gpt-4o-mini',
 		temperature: 0,
@@ -132,7 +132,7 @@ export const POST: RequestHandler = async (event) => {
 		});
 	}
 
-	if (!BILLI_DEV_WEBHOOK_URL) {
+	if (!env.BILLI_DEV_WEBHOOK_URL) {
 		console.error('[TimeEntry] BILLI_DEV_WEBHOOK_URL not configured');
 		return new Response(JSON.stringify({ error: 'Webhook URL not configured' }), {
 			status: 500,
@@ -239,12 +239,12 @@ export const POST: RequestHandler = async (event) => {
 		};
 
 		console.log('[TimeEntry] Sending to webhook:', {
-			url: BILLI_DEV_WEBHOOK_URL,
+			url: env.BILLI_DEV_WEBHOOK_URL,
 			payload: timeEntryPayload,
 		});
 
 		// Send to n8n webhook
-		const response = await fetch(BILLI_DEV_WEBHOOK_URL, {
+		const response = await fetch(env.BILLI_DEV_WEBHOOK_URL, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ timeEntry: timeEntryPayload }),

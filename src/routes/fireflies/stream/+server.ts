@@ -2,7 +2,7 @@
 import type { RequestHandler } from './$types';
 import { FirefliesAgent } from '$lib/services/fireflies-agent';
 import { logEvent } from '$lib/services/ops-logger';
-import { COHERE_API_KEY, VECTOR_DATABASE_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 
 export const POST: RequestHandler = async (event) => {
 	const session = await event.locals.auth();
@@ -11,11 +11,11 @@ export const POST: RequestHandler = async (event) => {
 		return new Response('Unauthorized', { status: 401 });
 	}
 
-	if (!COHERE_API_KEY) {
+	if (!env.COHERE_API_KEY) {
 		return new Response('Cohere API key not configured', { status: 500 });
 	}
 
-	if (!VECTOR_DATABASE_URL) {
+	if (!env.VECTOR_DATABASE_URL) {
 		return new Response('Vector database URL not configured', { status: 500 });
 	}
 
@@ -41,8 +41,8 @@ export const POST: RequestHandler = async (event) => {
 
 		// Create Fireflies Agent
 		const agent = new FirefliesAgent({
-			cohereApiKey: COHERE_API_KEY,
-			databaseUrl: VECTOR_DATABASE_URL,
+			cohereApiKey: env.COHERE_API_KEY,
+			databaseUrl: env.VECTOR_DATABASE_URL,
 			sessionId: sessionId || 'default',
 		});
 
