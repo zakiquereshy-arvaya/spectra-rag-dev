@@ -2,18 +2,6 @@ import {SvelteKitAuth} from '@auth/sveltekit';
 import MicrosoftEntraID from '@auth/core/providers/microsoft-entra-id';
 import { AUTH_MICROSOFT_ENTRA_ID_ID, AUTH_MICROSOFT_ENTRA_ID_SECRET, AUTH_MICROSOFT_ENTRA_ID_ISSUER } from '$env/static/private';
 
-// TEMP: minimal diagnostics (no full secret, no host/basepath noise)
-const clientIdLast4 = AUTH_MICROSOFT_ENTRA_ID_ID?.trim().slice(-4) || '****';
-const clientIdLen = AUTH_MICROSOFT_ENTRA_ID_ID?.trim().length || 0;
-const secretLast4 = AUTH_MICROSOFT_ENTRA_ID_SECRET?.trim().slice(-4) || '****';
-const issuerLast4 = AUTH_MICROSOFT_ENTRA_ID_ISSUER?.trim().slice(-4) || '****';
-
-console.log('[AUTH][CHECK] clientId last-4 / len :', clientIdLast4, '/', clientIdLen);
-console.log('[AUTH][CHECK] secret   last-4       :', secretLast4);
-console.log('[AUTH][CHECK] issuer   last-4       :', issuerLast4);
-
-// End temp diagnostics
-
 export const {handle} = SvelteKitAuth({
     providers: [
         MicrosoftEntraID({
@@ -31,6 +19,8 @@ export const {handle} = SvelteKitAuth({
         async jwt({ token, account }) {
             // Persist the OAuth access_token to the token right after signin
             if (account) {
+                token.accessToken = account.access_token;
+                token.refreshToken = account.refresh_token;
                 token.accessTokenExpires = account.expires_at;
             }
             return token;
@@ -39,18 +29,6 @@ export const {handle} = SvelteKitAuth({
             // Send properties to the client
             (session as any).accessToken = token.accessToken;
             return session;
-        },
-    },
-    debug: true,
-    logger: {
-        error(error: Error) {
-            console.error('[AUTH][ERROR]', error);
-        },
-        warn(code) {
-            console.warn('[AUTH][WARN]', code);
-        },
-        debug(code, metadata) {
-            console.log('[AUTH][DEBUG]', code, metadata);
         },
     },
     trustHost: true,
