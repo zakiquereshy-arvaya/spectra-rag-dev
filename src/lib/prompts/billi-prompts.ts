@@ -5,7 +5,6 @@
 
 import { getTodayEastern, formatDateEastern } from '$lib/utils/datetime';
 
-// ==================== IDENTITY ====================
 
 export function buildIdentityPrompt(
 	user: { name: string; email: string } | null,
