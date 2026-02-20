@@ -2,15 +2,15 @@ import {SvelteKitAuth} from '@auth/sveltekit';
 import MicrosoftEntraID from '@auth/core/providers/microsoft-entra-id';
 import { AUTH_MICROSOFT_ENTRA_ID_ID, AUTH_MICROSOFT_ENTRA_ID_SECRET, AUTH_MICROSOFT_ENTRA_ID_ISSUER } from '$env/static/private';
 
-// TEMP: safe diagnostics (no full secret)
-const clientIdLast4      = AUTH_MICROSOFT_ENTRA_ID_ID?.trim().slice(-4) || '****';
-const clientIdLength     = AUTH_MICROSOFT_ENTRA_ID_ID?.trim().length    || 0;
-const last4Secret        = AUTH_MICROSOFT_ENTRA_ID_SECRET?.trim().slice(-4) || '****';
-const callbackHost = () => process.env.VERCEL_URL || process.env.AUTH_URL || (process.env.HOST ? `https://${process.env.HOST}` : 'unknown');
+// TEMP: minimal diagnostics (no full secret, no host/basepath noise)
+const clientIdLast4 = AUTH_MICROSOFT_ENTRA_ID_ID?.trim().slice(-4) || '****';
+const clientIdLen = AUTH_MICROSOFT_ENTRA_ID_ID?.trim().length || 0;
+const secretLast4 = AUTH_MICROSOFT_ENTRA_ID_SECRET?.trim().slice(-4) || '****';
+const issuerLast4 = AUTH_MICROSOFT_ENTRA_ID_ISSUER?.trim().slice(-4) || '****';
 
-console.log('[AUTH][CHECK] clientId-last-4', clientIdLast4, 'len', clientIdLength);
-console.log('[AUTH][CHECK] secret-last-4', last4Secret);
-console.log('[AUTH][CHECK] ENV host', callbackHost());
+console.log('[AUTH][CHECK] clientId last-4 / len :', clientIdLast4, '/', clientIdLen);
+console.log('[AUTH][CHECK] secret   last-4       :', secretLast4);
+console.log('[AUTH][CHECK] issuer   last-4       :', issuerLast4);
 
 // End temp diagnostics
 
