@@ -27,3 +27,7 @@ vite.config.ts.timestamp-*
 /.cursor
 /plans
 /.n8n
+
+
+check-entra-token.sh
+sync-vercel-preview-auth-env.sh 

@@ -8,6 +8,9 @@ export const {handle} = SvelteKitAuth({
             clientId: AUTH_MICROSOFT_ENTRA_ID_ID,
             clientSecret: AUTH_MICROSOFT_ENTRA_ID_SECRET,
             issuer: AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+            client: {
+                token_endpoint_auth_method: 'client_secret_post',
+            },
             authorization: {
                 params: {
                     scope: 'openid profile email offline_access Calendars.ReadWrite User.Read.All',
