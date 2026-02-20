@@ -6,6 +6,18 @@
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+	let isSigningIn = $state(false);
+
+	async function handleSignIn() {
+		if (isSigningIn) return;
+		isSigningIn = true;
+		try {
+			await signIn('microsoft-entra-id');
+		} catch (error) {
+			console.error('Sign-in initiation failed:', error);
+			isSigningIn = false;
+		}
+	}
 
 	const tools = [
 		{
@@ -66,16 +78,18 @@
 							Internal tools and AI assistants for the Arvaya team
 						</p>
 						<button
-							onclick={() => signIn('microsoft-entra-id')}
+							onclick={handleSignIn}
+							disabled={isSigningIn}
 							class="inline-flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-semibold text-lg
 							       hover:from-amber-400 hover:to-orange-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-surface
-							       transition-all duration-200 shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/30 btn-press btn-glow animate-fade-in-up"
+							       transition-all duration-200 shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/30 btn-press btn-glow animate-fade-in-up
+							       disabled:opacity-70 disabled:cursor-not-allowed"
 							style="animation-delay: 0.3s"
 						>
 							<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
 								<path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z"/>
 							</svg>
-							Sign in with Microsoft
+							{isSigningIn ? 'Signing in...' : 'Sign in with Microsoft'}
 						</button>
 					</div>
 				{:else}
