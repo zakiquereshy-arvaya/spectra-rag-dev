@@ -67,6 +67,20 @@ function redirectToHome(origin: string): Response {
     });
 }
 
+function serializeError(error: unknown): Record<string, unknown> {
+    if (!(error instanceof Error)) {
+        return { raw: String(error) };
+    }
+
+    const maybeCause = (error as Error & { cause?: unknown }).cause;
+    return {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        cause: maybeCause,
+    };
+}
+
 export const handle: import('@sveltejs/kit').Handle = async ({ event, resolve }) => {
     const isCallbackRequest = event.url.pathname === CALLBACK_PATH;
     const code = event.url.searchParams.get('code');
@@ -129,7 +143,7 @@ export const handle: import('@sveltejs/kit').Handle = async ({ event, resolve })
     } catch (error) {
         console.error('[AuthTrace] callback_throw', {
             traceId,
-            error: error instanceof Error ? error.message : String(error),
+            error: serializeError(error),
         });
         throw error;
     }
