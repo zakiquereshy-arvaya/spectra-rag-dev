@@ -4,12 +4,16 @@ import { AUTH_MICROSOFT_ENTRA_ID_ID, AUTH_MICROSOFT_ENTRA_ID_SECRET, AUTH_MICROS
 import { env } from '$env/dynamic/private';
 import { createHash } from 'node:crypto';
 
+const clientId = AUTH_MICROSOFT_ENTRA_ID_ID.trim();
+const clientSecret = AUTH_MICROSOFT_ENTRA_ID_SECRET.trim();
+const issuer = AUTH_MICROSOFT_ENTRA_ID_ISSUER.trim();
+
 const { handle: authHandle } = SvelteKitAuth({
     providers: [
         MicrosoftEntraID({
-            clientId: AUTH_MICROSOFT_ENTRA_ID_ID,
-            clientSecret: AUTH_MICROSOFT_ENTRA_ID_SECRET,
-            issuer: AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+            clientId,
+            clientSecret,
+            issuer,
             client: {
                 token_endpoint_auth_method: 'client_secret_post',
             },
@@ -38,7 +42,7 @@ const { handle: authHandle } = SvelteKitAuth({
 });
 
 const CALLBACK_PATH = '/auth/callback/microsoft-entra-id';
-const isAuthDebugEnabled = env.AUTH_DEBUG === 'true';
+const isAuthDebugEnabled = env.AUTH_DEBUG?.trim() === 'true';
 
 function shortHash(value: string | null): string | null {
     if (!value) return null;
